@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  agents-orchestrator — launchd template.
+
+  TO USE:
+    1. Copy this file into the target repo's root, renamed to match its
+       `make` Makefile expectation:
+         com.agents-orchestrator.<repo-folder-name>.plist
+    2. Fill in every placeholder marked TODO below.
+    3. Install + load via `make ao-on` from the repo root.
+
+  Fires `orchestrator.py slow` once an hour. Slow mode processes at most
+  one issue per invocation, so this is self-limiting to ~1 issue/hour.
+
+  AO_DRY_RUN=1 is set for the initial soft launch — the orchestrator does
+  everything except the final merge. Once the dry-run window looks clean,
+  unload, delete the AO_DRY_RUN key + its <string>, and reload.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <!-- TODO: must match the plist filename without .plist -->
+    <string>com.agents-orchestrator.REPO-FOLDER-NAME</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <!-- TODO: adjust if AO_HOME is not ~/Desktop/Claudey -->
+        <string>/Users/YOUR-USERNAME/Desktop/Claudey/agents_orchestrator/orchestrator.py</string>
+        <string>slow</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <!-- TODO: absolute path to the target repo (where .agents-orchestrator.toml lives) -->
+    <string>/Users/YOUR-USERNAME/Projects/your-repo</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Remove this key (and its <string>) to go live after the soft launch. -->
+        <key>AO_DRY_RUN</key>
+        <string>1</string>
+
+        <!-- Optional: pick a non-default Claude account dir.
+        <key>CLAUDE_CONFIG_DIR</key>
+        <string>/Users/YOUR-USERNAME/.claude-personal</string>
+        -->
+
+        <!-- launchd starts with a minimal PATH; add the dirs holding any
+             tools your gates need (pnpm/uv/cargo) plus `gh`, `git`, `claude`. -->
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- Hourly. -->
+    <key>StartInterval</key>
+    <integer>3600</integer>
+
+    <!-- Don't fire on load — wait for the first interval. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- TODO: adjust to your log dir if you overrode it in .agents-orchestrator.toml -->
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR-USERNAME/Library/Logs/agents-orchestrator/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR-USERNAME/Library/Logs/agents-orchestrator/launchd.log</string>
+</dict>
+</plist>

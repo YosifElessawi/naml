@@ -1,0 +1,59 @@
+name: Agent task
+description: A self-contained task for agents-orchestrator to implement autonomously.
+title: "[agent] "
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for work you want an AI agent to pick up unattended.
+        Keep the scope small and the acceptance criteria concrete — the agent
+        has no way to ask follow-up questions. A human triages this to
+        `ready-for-agent` once it looks complete.
+
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: One paragraph — what should be true after this is done, and why.
+      placeholder: Briefly describe the change and why it matters.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: A checklist of observable, verifiable outcomes.
+      value: |
+        - [ ]
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: input
+    id: file-scope
+    attributes:
+      label: File scope hint
+      description: Comma-separated paths the change should stay within, or "anywhere".
+      placeholder: src/feature-x, packages/shared
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: Anything the agent should explicitly NOT touch or attempt.
+      placeholder: Do not modify legacy module Y. Do not change API contracts.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: definition-of-done
+    attributes:
+      label: Definition of done
+      options:
+        - label: All gates configured in .agents-orchestrator.toml pass locally
+          required: true

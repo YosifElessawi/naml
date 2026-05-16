@@ -1,0 +1,97 @@
+# agents-orchestrator — per-project config.
+#
+# Drop this at the root of a target repo (renamed to `.agents-orchestrator.toml`).
+# The orchestrator walks up from cwd looking for this file, so `make burst` /
+# `make slow` from anywhere inside the repo will find it.
+
+[repo]
+# GitHub slug — `gh` operates against this.
+slug = "owner/repo-name"
+
+# Optional. Default: the directory this config lives in.
+# root = "/Users/me/Projects/repo-name"
+
+# Branch all agent branches fork from and all PRs target.
+base_branch = "master"
+
+
+# Label state machine. Defaults are shown — override only if your repo uses
+# different label names.
+[labels]
+ready      = "ready-for-agent"
+running    = "agent-running"
+done       = "agent-done"
+failed     = "agent-failed"
+needs_info = "needs-info"
+
+
+# Local validation gates. Order matters — cheapest / most-likely-to-fail first.
+# The first gate to fail stops the chain and triggers the resume-based retry.
+#
+# Examples:
+#   JS / pnpm:
+#     [[gates]]
+#     name = "install"
+#     argv = ["pnpm", "install", "--frozen-lockfile"]
+#
+#     [[gates]]
+#     name = "lint"
+#     argv = ["pnpm", "lint"]
+#
+#   Python / uv:
+#     [[gates]]
+#     name = "lint"
+#     argv = ["uv", "run", "ruff", "check", "."]
+#
+#     [[gates]]
+#     name = "test"
+#     argv = ["uv", "run", "pytest", "-q"]
+#
+#   Rust:
+#     [[gates]]
+#     name = "test"
+#     argv = ["cargo", "test", "--all"]
+
+[[gates]]
+name = "lint"
+argv = ["pnpm", "lint"]
+
+[[gates]]
+name = "typecheck"
+argv = ["pnpm", "typecheck"]
+
+[[gates]]
+name = "test"
+argv = ["pnpm", "test"]
+
+[[gates]]
+name = "build"
+argv = ["pnpm", "build"]
+
+
+[run]
+# Hard wall-clock cap per Claude invocation.
+cap_minutes = 30
+# Resume-and-retry attempts on a failed gate (warm cache, same session).
+max_retries = 2
+
+
+[burst]
+max_issues   = 5
+max_hours    = 4
+# Stop the burst loop when fewer than this many Pro messages remain.
+min_headroom = 8
+
+
+[claude]
+pro_limit = 45
+bin       = "claude"
+# Pin a specific Claude account dir for this project. If unset, the
+# orchestrator inherits CLAUDE_CONFIG_DIR from the shell that ran it
+# (and falls back to claude's own default, ~/.claude).
+# config_dir = "~/.claude-personal"
+
+
+# Optional. Default: ~/Library/Logs/agents-orchestrator/<slug-with-dashes>/
+# [logs]
+# dir = "~/Library/Logs/agents-orchestrator/repo-name"
