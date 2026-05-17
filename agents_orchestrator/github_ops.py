@@ -22,11 +22,48 @@ class GitError(RuntimeError):
     """A ``git`` invocation exited non-zero."""
 
 
+# Thread-local cwd override — set with `with in_dir(path):` so a lane
+# thread can route every git/gh call into its own worktree without
+# threading a `cwd` arg through every helper.
+import threading as _threading  # noqa: E402
+_local = _threading.local()
+
+
+class in_dir:
+    """Context manager that pins github_ops subprocess cwd for THIS thread.
+
+    Usage:
+        with github_ops.in_dir("/path/to/worktree"):
+            github_ops.git("status")   # runs in worktree
+            github_ops.merge_pr(...)   # runs in worktree
+
+    Nests cleanly. Outside any `in_dir` block, cwd defaults to cfg.repo_root.
+    """
+
+    def __init__(self, path: str | None) -> None:
+        self._path = path
+
+    def __enter__(self) -> "in_dir":
+        self._prev = getattr(_local, "cwd", None)
+        if self._path is not None:
+            _local.cwd = self._path
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        _local.cwd = self._prev
+
+
+def _active_cwd() -> str:
+    cwd = getattr(_local, "cwd", None)
+    if cwd:
+        return cwd
+    return str(config.load().repo_root)
+
+
 def _run(cmd: list[str], *, cwd: str | None = None) -> str:
-    cfg = config.load()
     result = subprocess.run(
         cmd,
-        cwd=cwd or str(cfg.repo_root),
+        cwd=cwd or _active_cwd(),
         capture_output=True,
         text=True,
     )
@@ -98,7 +135,7 @@ def has_merge_conflict(branch: str) -> bool:
     cfg = config.load()
     result = subprocess.run(
         ["git", "merge-tree", "--write-tree", f"origin/{cfg.base_branch}", branch],
-        cwd=str(cfg.repo_root),
+        cwd=_active_cwd(),
         capture_output=True,
         text=True,
     )
@@ -191,7 +228,7 @@ def remove_label(number: int, label: str) -> None:
     # Removing a label that isn't present makes gh exit non-zero; tolerate it.
     result = subprocess.run(
         ["gh", "issue", "edit", str(number), "--remove-label", label, "--repo", cfg.repo],
-        cwd=str(cfg.repo_root),
+        cwd=_active_cwd(),
         capture_output=True,
         text=True,
     )

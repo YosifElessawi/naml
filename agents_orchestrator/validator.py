@@ -28,13 +28,17 @@ def _tail(text: str, lines: int = 40) -> str:
     return "\n".join(text.splitlines()[-lines:])
 
 
-def run_gates(log_path: Path) -> ValidationResult:
+def run_gates(log_path: Path, *, cwd: Path | None = None) -> ValidationResult:
     """Run every gate in order, appending output to ``log_path``.
 
     Returns as soon as a gate fails. A green run reports
     ``passed=True, failed_gate=None``.
+
+    ``cwd`` lets a parallel lane run gates inside its worktree instead of
+    the main repo root. Defaults to ``cfg.repo_root``.
     """
     cfg = config.load()
+    gate_cwd = str(cwd) if cwd else str(cfg.repo_root)
     with log_path.open("a", encoding="utf-8") as log:
         for gate in cfg.gates:
             name = gate.name
@@ -45,7 +49,7 @@ def run_gates(log_path: Path) -> ValidationResult:
             try:
                 result = subprocess.run(
                     argv,
-                    cwd=str(cfg.repo_root),
+                    cwd=gate_cwd,
                     capture_output=True,
                     text=True,
                     timeout=20 * 60,

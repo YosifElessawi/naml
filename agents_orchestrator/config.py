@@ -118,6 +118,12 @@ class Config:
 
     # Behaviour
     dry_run: bool = False
+    # Concurrent lanes — when >1, the orchestrator picks N independent
+    # batches and runs each in its own git worktree + thread. Different
+    # batch:* labels are inherently independent. Issues without a batch
+    # label are treated as their own one-item batch. Defaults to 1 so the
+    # behaviour is identical to single-lane until the user opts in.
+    parallel_lanes: int = 1
 
     # Paths
     log_dir: Path = field(default_factory=Path)
@@ -129,6 +135,18 @@ class Config:
     @property
     def current_json(self) -> Path:
         return self.log_dir / "current.json"
+
+    def lane_current_json(self, lane: int) -> Path:
+        return self.log_dir / f"current.lane{lane}.json"
+
+    @property
+    def worktree_dir(self) -> Path:
+        """Where lane worktrees live. Outside the user repo so .gitignore stays clean."""
+        return self.log_dir.parent / "worktrees"
+
+    def lane_worktree(self, lane: int) -> Path:
+        slug = self.repo.replace("/", "-") or "repo"
+        return self.worktree_dir / f"{slug}-lane{lane}"
 
     def ensure_log_dir(self) -> None:
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -315,6 +333,13 @@ def load(start: Path | None = None) -> Config:
     log_dir = _expand(log_dir_raw) if log_dir_raw else _default_log_dir(repo)
     log_dir = Path(_env_str("AO_LOG_DIR", str(log_dir))).expanduser()
 
+    # Parallel lanes — burst.parallel_lanes in TOML, AO_PARALLEL_LANES in env.
+    parallel_lanes = _env_int(
+        "AO_PARALLEL_LANES",
+        int(burst_tbl.get("parallel_lanes", 1)),
+    )
+    parallel_lanes = max(1, min(parallel_lanes, 4))  # hard cap at 4 for safety
+
     dry_run = _env_bool("AO_DRY_RUN")
     # dry_run is back-compat shorthand for stop_after=pr. If both are set,
     # the more conservative wins (stop earlier).
@@ -345,6 +370,7 @@ def load(start: Path | None = None) -> Config:
         burst_min_tokens=burst_min_tokens,
         cost_calibration=cost_calibration,
         dry_run=dry_run,
+        parallel_lanes=parallel_lanes,
         log_dir=log_dir,
     )
     _cache = cfg

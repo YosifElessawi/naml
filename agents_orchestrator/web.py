@@ -14,10 +14,9 @@ Bind defaults to 127.0.0.1.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import shlex
-import shutil
 import subprocess
 import sys
 import threading
@@ -28,64 +27,6 @@ from pathlib import Path
 from typing import Any
 
 from . import claude_session, config, github_ops
-
-
-class _LaunchError(RuntimeError):
-    pass
-
-
-def _open_in_terminal(cwd: str, cmd: str) -> None:
-    """Spawn a new terminal window in ``cwd`` running ``cmd``.
-
-    Auto-detects:
-      1. cmux  — if its binary is on PATH, use `cmux new-workspace --cwd … --command …`
-      2. macOS Terminal — fall back to osascript
-
-    Override via the env var ``AO_TERMINAL_CMD`` (a shell command with
-    ``{cwd}`` and ``{cmd}`` placeholders), e.g.::
-
-        export AO_TERMINAL_CMD='wezterm cli spawn --cwd {cwd} -- bash -c "{cmd}"'
-    """
-    template = os.environ.get("AO_TERMINAL_CMD", "").strip()
-    if template:
-        rendered = template.replace("{cwd}", cwd).replace("{cmd}", cmd)
-        try:
-            subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as exc:
-            raise _LaunchError(f"AO_TERMINAL_CMD failed: {exc.stderr.strip() or exc}")
-        return
-
-    cmux = shutil.which("cmux")
-    if cmux:
-        # cmux opens a new workspace running the command directly — no
-        # shell wrapper needed. Command must include the env-var prefix
-        # itself (we already format it that way).
-        try:
-            subprocess.run(
-                [cmux, "new-workspace", "--cwd", cwd, "--command", cmd],
-                check=True, capture_output=True, text=True,
-            )
-            return
-        except subprocess.CalledProcessError as exc:
-            # Fall through to Terminal if cmux is broken.
-            sys.stderr.write(f"[ao-web] cmux launch failed, falling back: {exc.stderr.strip()}\n")
-
-    # macOS Terminal fallback via osascript. Build a shell command that
-    # cds first so the resumed agent sees the repo as cwd.
-    full = f"cd {shlex.quote(cwd)} && {cmd}"
-    # Escape backslashes and double-quotes for the AppleScript string literal.
-    esc = full.replace("\\", "\\\\").replace('"', '\\"')
-    applescript = (
-        f'tell application "Terminal" to do script "{esc}"\n'
-        'tell application "Terminal" to activate'
-    )
-    try:
-        subprocess.run(
-            ["osascript", "-e", applescript],
-            check=True, capture_output=True, text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise _LaunchError(f"failed to open Terminal: {exc.stderr.strip() or exc}")
 
 
 # --- state assembly -------------------------------------------------------
@@ -116,6 +57,7 @@ def _read_runs(limit: int = 20) -> list[dict]:
 
 
 def _read_current() -> dict | None:
+    """Legacy single-lane fallback — read current.json if no lane files exist."""
     cfg = config.load()
     if not cfg.current_json.exists():
         return None
@@ -123,6 +65,31 @@ def _read_current() -> dict | None:
         return json.loads(cfg.current_json.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def _read_currents() -> list[dict]:
+    """Read every lane state file. One entry per active lane.
+
+    Falls back to the legacy ``current.json`` when no lane files exist
+    (e.g., for an older orchestrator process still running mid-deploy).
+    """
+    cfg = config.load()
+    if not cfg.log_dir.exists():
+        return []
+    lanes: list[dict] = []
+    for path in sorted(cfg.log_dir.glob("current.lane*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        lanes.append(data)
+    if not lanes:
+        legacy = _read_current()
+        if legacy:
+            legacy.setdefault("lane", 1)
+            lanes.append(legacy)
+    lanes.sort(key=lambda d: int(d.get("lane", 1)))
+    return lanes
 
 
 # Cache the queue read for ~5s so multi-tab polling doesn't hammer `gh`.
@@ -227,7 +194,9 @@ def _usage_to_dict(u: claude_session.Usage, *, limit: int | None = None) -> dict
 
 def _build_state() -> dict:
     cfg = config.load()
-    current = _read_current()
+    currents = _read_currents()
+    # Legacy single-lane field. The UI prefers `currents` when present.
+    current = currents[0] if currents else None
     runs = _read_runs(limit=20)
     queue, queue_err = _read_queue_cached()
 
@@ -283,9 +252,12 @@ def _build_state() -> dict:
             "claude.cost_calibration": cfg.cost_calibration,
             "run.cap_minutes": cfg.run_cap_minutes,
             "run.max_retries": cfg.max_retries,
+            "burst.parallel_lanes": cfg.parallel_lanes,
         },
         "now": datetime.now(timezone.utc).isoformat(),
         "current": current,
+        "currents": currents,
+        "parallel_lanes": cfg.parallel_lanes,
         "current_cap_minutes": cfg.run_cap_minutes,
         "runs": runs,
         "queue": queue,
@@ -297,6 +269,31 @@ def _build_state() -> dict:
         },
         "run_stats": run_stats,
     }
+
+
+# --- ETag ----------------------------------------------------------------
+
+# Fields that drift every poll without anything actually changing. Strip
+# before hashing so a quiet system returns 304 forever (until real state moves).
+_ETAG_DRIFT_KEYS = ("now",)
+_ETAG_DRIFT_USAGE_KEYS = ("reset_in_seconds",)
+
+
+def _payload_etag(payload: dict) -> str:
+    """Hash a stable projection of the state — excludes wall-clock drift."""
+    stripped = {k: v for k, v in payload.items() if k not in _ETAG_DRIFT_KEYS}
+    usage = stripped.get("usage") or {}
+    if usage:
+        usage_clean: dict[str, Any] = {}
+        for window, block in usage.items():
+            if isinstance(block, dict):
+                usage_clean[window] = {k: v for k, v in block.items()
+                                       if k not in _ETAG_DRIFT_USAGE_KEYS}
+            else:
+                usage_clean[window] = block
+        stripped["usage"] = usage_clean
+    blob = json.dumps(stripped, sort_keys=True, default=str).encode("utf-8")
+    return '"' + hashlib.sha1(blob).hexdigest() + '"'
 
 
 # --- HTTP handler ---------------------------------------------------------
@@ -323,6 +320,28 @@ class _Handler(BaseHTTPRequestHandler):
             status,
         )
 
+    def _send_304(self, etag: str) -> None:
+        try:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _send_json_with_etag(self, payload: Any, etag: str) -> None:
+        body = json.dumps(payload).encode("utf-8")
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("ETag", etag)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _send_html(self, body: str, status: int = 200) -> None:
         self._send_bytes(body.encode("utf-8"), "text/html; charset=utf-8", status)
 
@@ -348,7 +367,12 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:  # last-ditch — surface to UI
                 self._send_json({"error": str(exc)}, status=500)
                 return
-            self._send_json(payload)
+            etag = _payload_etag(payload)
+            client_etag = self.headers.get("If-None-Match", "").strip()
+            if client_etag and client_etag == etag:
+                self._send_304(etag)
+                return
+            self._send_json_with_etag(payload, etag)
             return
         self._send_json({"error": "not found"}, status=404)
 
@@ -359,48 +383,7 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/api/open_log":
             self._handle_open_log()
             return
-        if self.path != "/api/open":
-            self._send_json({"error": "not found"}, status=404)
-            return
-        length = int(self.headers.get("Content-Length", "0") or 0)
-        raw = self.rfile.read(length).decode("utf-8") if length else "{}"
-        try:
-            payload = json.loads(raw or "{}")
-        except json.JSONDecodeError:
-            self._send_json({"error": "invalid JSON"}, status=400)
-            return
-        session_id = payload.get("session_id", "")
-        if not isinstance(session_id, str) or not session_id:
-            self._send_json({"error": "session_id required"}, status=400)
-            return
-        # Guard against shell-injection: only allow UUID-shaped strings.
-        import re
-        if not re.fullmatch(r"[0-9a-fA-F-]{8,64}", session_id):
-            self._send_json({"error": "session_id must be a UUID-like token"}, status=400)
-            return
-
-        # Build the claude command — pin CLAUDE_CONFIG_DIR to the toml's
-        # claude.config_dir so the resumed agent uses the SAME account the
-        # orchestrator ran it under. EXCEPT when the toml value equals the
-        # default ~/.claude — claude's keychain entry for the default
-        # account is keyed against the unset env var, not the explicit
-        # path. Setting the var explicitly there would surface "Not
-        # logged in". Same logic as runner._claude_env.
-        cfg = config.load()
-        default_dir = Path.home() / ".claude"
-        if cfg.claude_config_dir.resolve() == default_dir.resolve():
-            cmd = f"claude --resume {session_id}"
-        else:
-            claude_dir = str(cfg.claude_config_dir)
-            cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(claude_dir)} claude --resume {session_id}"
-        cwd = str(cfg.repo_root)
-
-        try:
-            _open_in_terminal(cwd, cmd)
-        except _LaunchError as exc:
-            self._send_json({"error": str(exc)}, status=500)
-            return
-        self._send_json({"ok": True, "cmd": cmd, "cwd": cwd})
+        self._send_json({"error": "not found"}, status=404)
 
     def _handle_open_log(self) -> None:
         """Open a run log file via `open` (macOS default app)."""
@@ -562,6 +545,13 @@ def _iso_dt(v):
         raise ValueError("must be ISO 8601 (e.g. 2026-05-17T09:50:00)")
 
 
+def _lanes_int(v):
+    n = int(v)
+    if n < 1 or n > 4:
+        raise ValueError("parallel_lanes must be between 1 and 4")
+    return n
+
+
 _EDITABLE: dict[tuple[str, str], Any] = {
     ("pipeline", "stop_after"): _enum("pr", "review", "merge"),
     ("pipeline", "auto_review"): _bool,
@@ -573,6 +563,7 @@ _EDITABLE: dict[tuple[str, str], Any] = {
     ("claude", "cost_calibration"): _pos_float,
     ("run", "cap_minutes"): _pos_int,
     ("run", "max_retries"): _nonneg_int,
+    ("burst", "parallel_lanes"): _lanes_int,
 }
 
 
@@ -790,13 +781,49 @@ _INDEX_HTML = r"""<!doctype html>
     }
 
     /* === Bar chart === */
+    .chart-filters {
+      display: flex; flex-wrap: wrap; gap: 8px 16px;
+      padding: 8px 0 0; margin-top: 8px;
+      font-size: 11px;
+      border-top: 1px solid var(--border);
+    }
+    .chart-filters .filter-group {
+      display: flex; align-items: center; gap: 4px;
+    }
+    .chart-filters .filter-label {
+      color: var(--muted-2);
+      margin-right: 2px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      font-size: 10px;
+    }
+    .chart-filters .chip {
+      padding: 3px 9px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 11px;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+    }
+    .chart-filters .chip:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .chart-filters .chip.active {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
     .chart {
       display: flex; align-items: stretch;  /* stretch so .bar-col fills height */
       gap: 3px;
       height: 100px;
       padding: 8px 0 0;
-      margin-top: 6px;
-      border-top: 1px solid var(--border);
+      margin-top: 8px;
     }
     .chart .bar-col {
       flex: 1;
@@ -806,24 +833,39 @@ _INDEX_HTML = r"""<!doctype html>
       display: flex; flex-direction: column;
       justify-content: flex-end;
       cursor: pointer;
+      position: relative;
     }
     .chart .bar-fill {
       width: 100%;
       background: var(--bar-good);
       border-radius: 2px 2px 0 0;
-      transition: opacity 0.12s;
+      transition: opacity 0.12s, transform 0.12s;
     }
-    .chart .bar-col:hover .bar-fill { opacity: 0.7; }
+    .chart .bar-col:hover .bar-fill {
+      opacity: 0.8;
+      transform: translateY(-1px);
+    }
     .chart .bar-fill.outcome-failed     { background: var(--bar-failed); }
     .chart .bar-fill.outcome-needs-info { background: var(--bar-needs); }
     .chart .bar-fill.outcome-stopped-at-pr,
     .chart .bar-fill.outcome-stopped-at-review,
     .chart .bar-fill.outcome-dry-run    { background: var(--yellow); }
     .chart .bar-fill.outcome-done       { background: var(--green); }
+    .chart .bar-label {
+      position: absolute;
+      bottom: -16px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      color: var(--muted-2);
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      white-space: nowrap;
+      pointer-events: none;
+    }
     .chart-meta {
       display: flex; justify-content: space-between;
       font-size: 11px; color: var(--muted-2);
-      padding: 6px 0 0;
+      padding: 22px 0 0;  /* room for the per-bar issue labels */
     }
     .chart-empty { color: var(--muted-2); padding: 20px 0; text-align: center; font-size: 12px; }
 
@@ -842,6 +884,28 @@ _INDEX_HTML = r"""<!doctype html>
     }
     .session-row .mono { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; }
     .session-row button { padding: 3px 9px; font-size: 11px; }
+
+    /* Compact icon buttons used in session rows + run lists */
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px;
+      padding: 0; border-radius: 6px;
+      background: var(--bar-bg);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+    }
+    .icon-btn:hover {
+      background: var(--panel-hover, var(--bar-bg));
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .icon-btn:active { transform: scale(0.94); }
+    .icon-btn.copied {
+      color: var(--green); border-color: var(--green);
+    }
+    .icon-btn svg { width: 14px; height: 14px; display: block; }
     .outcome { font-weight: 600; }
     .outcome.done             { color: var(--green); }
     .outcome.failed           { color: var(--red); }
@@ -889,6 +953,131 @@ _INDEX_HTML = r"""<!doctype html>
     .bar.yellow > span { background: var(--yellow); }
     .bar.red    > span { background: var(--red); }
     .bar.green  > span { background: var(--green); }
+
+    /* === Lane cards (multi-lane Now Running) === */
+    .lanes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 12px;
+    }
+    .lane-card {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .lanes-grid .lane-card { background: var(--panel); }
+
+    /* === Stage-aware progress for the active run === */
+    /*
+     * Layout: a continuous rail behind the dots, an animated fill that
+     * advances with completed stages, and dots that sit on top with
+     * state-aware styling. Labels and timings live in a separate row
+     * below so layout doesn't shift when retry/attempt info appears.
+     */
+    .stage-bar {
+      position: relative;
+      margin: 14px 4px 6px;
+      padding: 14px 0 22px;     /* room for labels under the dots */
+    }
+    .stage-bar .rail {
+      position: absolute;
+      left: 6px; right: 6px;
+      top: 20px; height: 3px;
+      background: var(--border);
+      border-radius: 2px; overflow: hidden;
+    }
+    .stage-bar .rail-fill {
+      position: absolute; inset: 0;
+      width: 0%;
+      background: linear-gradient(90deg, var(--green), var(--accent));
+      border-radius: 2px;
+      transition: width 0.45s cubic-bezier(.22,.61,.36,1);
+    }
+    .stage-bar .dots {
+      position: relative;
+      display: flex; justify-content: space-between;
+      z-index: 1;
+    }
+    .stage-bar .seg {
+      flex: 0 0 auto;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 6px;
+      width: 14px;
+      position: relative;
+    }
+    .stage-bar .dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--panel);
+      border: 2px solid var(--border);
+      box-shadow: 0 0 0 3px var(--panel);  /* hide rail behind dot */
+      transition: background 0.25s ease, border-color 0.25s ease,
+                  transform 0.25s cubic-bezier(.22,.61,.36,1);
+    }
+    .stage-bar .label {
+      font-size: 10px;
+      color: var(--muted-2);
+      text-transform: lowercase;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      position: absolute;
+      top: 22px;
+      left: 50%; transform: translateX(-50%);
+      transition: color 0.25s ease, font-weight 0.25s ease;
+    }
+    .stage-bar .seg.done .dot {
+      background: var(--green);
+      border-color: var(--green);
+    }
+    .stage-bar .seg.done .label { color: var(--muted); }
+    .stage-bar .seg.active .dot {
+      background: var(--accent);
+      border-color: var(--accent);
+      transform: scale(1.35);
+    }
+    .stage-bar .seg.active .dot::after {
+      content: "";
+      position: absolute; inset: -8px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0.18;
+      animation: stagehalo 1.6s ease-in-out infinite;
+    }
+    .stage-bar .seg.active .label {
+      color: var(--text); font-weight: 600;
+    }
+    .stage-bar .seg.failed .dot {
+      background: var(--red); border-color: var(--red);
+    }
+    /* Retry badge anchored on the dot itself — no layout shift below. */
+    .stage-bar .seg .retry-badge {
+      position: absolute;
+      top: -8px; left: calc(50% + 6px);
+      background: var(--yellow);
+      color: #0b0c0e;
+      font-size: 9px; font-weight: 700;
+      padding: 1px 5px; border-radius: 8px;
+      line-height: 1.3;
+      box-shadow: 0 0 0 2px var(--panel);
+      pointer-events: none;
+    }
+    @keyframes stagehalo {
+      0%, 100% { transform: scale(1);   opacity: 0.18; }
+      50%      { transform: scale(1.35); opacity: 0;    }
+    }
+    .stage-meta {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: baseline;
+      gap: 12px;
+      margin-top: 4px;
+      font-size: 11px;
+    }
+    .stage-meta .left  { color: var(--text); font-weight: 500; }
+    .stage-meta .right {
+      color: var(--muted); font-variant-numeric: tabular-nums;
+    }
 
     /* === Modal === */
     .modal-backdrop {
@@ -1077,6 +1266,10 @@ _INDEX_HTML = r"""<!doctype html>
               <span>Retries on gate failure</span>
               <input type="number" name="run.max_retries" min="0">
             </label>
+            <label class="block">
+              <span>Parallel lanes <span class="small dim">(burst mode only · independent batches run concurrently · 1–4)</span></span>
+              <input type="number" name="burst.parallel_lanes" min="1" max="4">
+            </label>
           </fieldset>
 
           <fieldset>
@@ -1210,47 +1403,170 @@ function renderStats(state) {
   `;
 }
 
+// Chart filter state — persists across refreshes via in-memory window state.
+window.__chartFilters = window.__chartFilters || {
+  outcome: 'all',  // 'all' | 'done' | 'failed' | 'needs-info' | 'stopped' | 'finish'
+  mode:    'all',  // 'all' | 'burst' | 'slow' | 'finish'
+  range:   'all',  // 'all' | '24h' | '7d'  | '30d'
+};
+
+const OUTCOME_FILTERS = [
+  ['all',        'All'],
+  ['done',       'Done'],
+  ['failed',     'Failed'],
+  ['needs-info', 'Needs-info'],
+  ['stopped',    'Stopped'],
+];
+const MODE_FILTERS = [
+  ['all',    'All'],
+  ['burst',  'Burst'],
+  ['slow',   'Slow'],
+  ['finish', 'Finish'],
+];
+const RANGE_FILTERS = [
+  ['all', 'All'],
+  ['24h', '24h'],
+  ['7d',  '7d'],
+  ['30d', '30d'],
+];
+const RANGE_MS = { '24h': 86400000, '7d': 7 * 86400000, '30d': 30 * 86400000 };
+
+function applyChartFilters(data) {
+  const f = window.__chartFilters;
+  const now = Date.now();
+  return data.filter(p => {
+    if (f.outcome !== 'all') {
+      const o = String(p.outcome || '');
+      if (f.outcome === 'stopped') {
+        if (!o.startsWith('stopped') && o !== 'dry-run') return false;
+      } else if (o !== f.outcome) {
+        return false;
+      }
+    }
+    if (f.mode !== 'all' && String(p.mode || '') !== f.mode) return false;
+    if (f.range !== 'all') {
+      const ts = p.started_at ? new Date(p.started_at).getTime() : 0;
+      if (!ts || now - ts > RANGE_MS[f.range]) return false;
+    }
+    return true;
+  });
+}
+
+function setChartFilter(group, value) {
+  window.__chartFilters[group] = value;
+  renderChart(window.__lastState || {});
+}
+window.setChartFilter = setChartFilter;
+
+function renderChartFilters() {
+  const f = window.__chartFilters;
+  const group = (name, key, items) => `
+    <div class="filter-group">
+      <span class="filter-label">${name}</span>
+      ${items.map(([v, label]) => `
+        <button type="button" class="chip ${f[key] === v ? 'active' : ''}"
+                onclick="setChartFilter('${key}', '${v}')">${escape(label)}</button>
+      `).join('')}
+    </div>`;
+  return `
+    <div class="chart-filters">
+      ${group('Outcome', 'outcome', OUTCOME_FILTERS)}
+      ${group('Mode',    'mode',    MODE_FILTERS)}
+      ${group('Range',   'range',   RANGE_FILTERS)}
+    </div>`;
+}
+
 function renderChart(state) {
-  const data = (state.run_stats && state.run_stats.chart) || [];
-  if (!data.length) {
-    $('#chart').innerHTML = '<div class="chart-empty">No runs yet — kick one off with <code>make slow</code>.</div>';
+  const all = (state.run_stats && state.run_stats.chart) || [];
+  const data = applyChartFilters(all);
+  const filtersHtml = renderChartFilters();
+
+  if (!all.length) {
+    $('#chart').innerHTML = filtersHtml +
+      '<div class="chart-empty">No runs yet — kick one off with <code>make slow</code>.</div>';
     $('#chart-meta-left').textContent = '';
     $('#chart-meta-right').textContent = '';
     return;
   }
+  if (!data.length) {
+    $('#chart').innerHTML = filtersHtml +
+      '<div class="chart-empty">No runs match the current filters.</div>';
+    $('#chart-meta-left').textContent = `0 of ${all.length} runs`;
+    $('#chart-meta-right').textContent = '';
+    window.__chartData = [];
+    return;
+  }
+
   const max = data.reduce((m, p) => Math.max(m, p.tokens), 0) || 1;
+  // Show the issue # under every bar when 18 or fewer bars are visible — at
+  // higher density the labels would overlap each other. Above that, fall
+  // back to "every Nth" labels.
+  const showEveryNth = data.length <= 18 ? 1 : Math.ceil(data.length / 18);
   const bars = data.map((p, i) => {
     const h = Math.max(2, Math.round((p.tokens / max) * 100));
     const cls = 'outcome-' + String(p.outcome || '').replace(/[^a-z-]/g, '-');
+    const showLabel = (i % showEveryNth === 0) || i === data.length - 1;
+    const label = showLabel ? `<div class="bar-label">#${p.issue_number}</div>` : '';
     return `<div class="bar-col" data-idx="${i}"
+              title="#${p.issue_number} · ${escape(p.outcome || '')}"
               onmouseenter="showTip(event, ${i})"
               onmousemove="moveTip(event)"
-              onmouseleave="hideTip()">
+              onmouseleave="hideTip()"
+              onclick="onChartBarClick(${i})">
               <div class="bar-fill ${cls}" style="height:${h}%"></div>
+              ${label}
             </div>`;
   }).join('');
-  $('#chart').innerHTML = `<div class="chart">${bars}</div>`;
-  $('#chart-meta-left').textContent = `${data.length} runs`;
+  $('#chart').innerHTML = filtersHtml + `<div class="chart">${bars}</div>`;
+  $('#chart-meta-left').textContent =
+    data.length === all.length
+      ? `${data.length} runs`
+      : `${data.length} of ${all.length} runs (filtered)`;
   $('#chart-meta-right').textContent =
     `${fmtTokens(data[0].tokens)} → ${fmtTokens(data[data.length - 1].tokens)} (oldest → newest)`;
   window.__chartData = data;
 }
+
+function onChartBarClick(idx) {
+  const p = (window.__chartData || [])[idx];
+  if (!p) return;
+  // Click → open log if we have one; otherwise copy the resume command.
+  if (p.log_path) {
+    openLog(p.log_path, null);
+  } else if (p.session_id) {
+    copyResume(p.session_id, null);
+  }
+}
+window.onChartBarClick = onChartBarClick;
 
 function showTip(ev, idx) {
   const data = window.__chartData || [];
   const p = data[idx]; if (!p) return;
   const tt = $('#tt');
   const batch = p.batch_id ? ` · batch:${escape(p.batch_id)}` : '';
+  const lane  = p.lane    ? ` · lane ${p.lane}`              : '';
+  const mode  = p.mode    ? `<span>${escape(p.mode)}</span>` : '';
+  const sid   = p.session_id
+    ? `<div class="dim mono small">${escape(String(p.session_id).slice(0, 8))}…</div>` : '';
+  const pr    = p.pr_url
+    ? `<div class="small"><a href="${escape(p.pr_url)}" target="_blank" rel="noopener">open PR</a></div>` : '';
+  const hint  = p.log_path
+    ? `<div class="dim small">click bar to open log</div>`
+    : (p.session_id ? `<div class="dim small">click bar to copy resume cmd</div>` : '');
   tt.innerHTML = `
-    <div class="label">Run · ${escape(p.outcome || '')}</div>
+    <div class="label">Run · ${escape(p.outcome || '')}${lane}</div>
     <div><strong>#${p.issue_number}</strong>${batch}</div>
     <div class="truncate">${escape(p.issue_title || '')}</div>
     <div class="row2 dim">
       <span>${fmtTokens(p.tokens)} tok</span>
       <span>$${(p.cost_usd || 0).toFixed(2)}</span>
       <span>${fmtDuration(p.duration_sec)}</span>
+      ${mode}
     </div>
+    ${sid}
+    ${pr}
     <div class="dim">${fmtAgo(p.started_at)}</div>
+    ${hint}
   `;
   tt.classList.add('show');
   moveTip(ev);
@@ -1267,32 +1583,154 @@ function hideTip() { $('#tt').classList.remove('show'); }
 window.showTip = showTip; window.moveTip = moveTip; window.hideTip = hideTip;
 
 // ===========================================================================
-// Now running
+// Now running — stage-aware
 // ===========================================================================
+
+// Stage lists per run-mode + stop_after. Each entry: [internal-name, label].
+const PIPELINE_STAGES_FULL = [
+  ['setup',  'setup'],
+  ['agent',  'agent'],
+  ['gates',  'gates'],
+  ['push',   'push'],
+  ['pr',     'pr'],
+  ['review', 'review'],
+  ['merge',  'merge'],
+];
+const FINISH_STAGES = [
+  ['finish-check',  'check'],
+  ['finish-rebase', 'rebase'],
+  ['finish-push',   'push'],
+  ['finish-merge',  'merge'],
+];
+
+function stagesFor(state, c) {
+  if (c.mode === 'finish') return FINISH_STAGES;
+  const stop = state.stop_after || 'merge';
+  if (stop === 'pr')     return PIPELINE_STAGES_FULL.slice(0, 5);
+  if (stop === 'review') return PIPELINE_STAGES_FULL.slice(0, 6);
+  return PIPELINE_STAGES_FULL;
+}
+
+function renderStageBar(state, c) {
+  const stages = stagesFor(state, c);
+  const cur = c.stage || stages[0][0];
+  const idx = stages.findIndex(([key]) => key === cur);
+  const known = idx >= 0;
+  const total = stages.length;
+
+  // Rail fill: 0% at first stage, 100% when last stage is active/done.
+  // Position the fill so the rail visually shows progress between dots.
+  let fillPct = 0;
+  if (known && total > 1) {
+    fillPct = Math.min(100, (idx / (total - 1)) * 100);
+  }
+
+  // Show the retry badge on the dot that's actively being retried.
+  // For pipeline runs, retries happen during agent or gates stages.
+  const retryStages = new Set(['agent', 'gates']);
+  const attempt = (c.attempt && c.attempt > 0) ? c.attempt : 0;
+
+  const dots = stages.map(([key, label], i) => {
+    let cls = 'pending';
+    if (known) {
+      if (i < idx) cls = 'done';
+      else if (i === idx) cls = 'active';
+    }
+    const badge = (attempt && cls === 'active' && retryStages.has(key))
+      ? `<span class="retry-badge" title="Retry ${attempt}">${attempt}</span>` : '';
+    return `<div class="seg ${cls}"><div class="dot">${badge}</div><div class="label">${label}</div></div>`;
+  }).join('');
+
+  return `
+    <div class="stage-bar">
+      <div class="rail"><div class="rail-fill" style="width:${fillPct}%"></div></div>
+      <div class="dots">${dots}</div>
+    </div>
+  `;
+}
+
+// Inline SVG icons — `clipboard` for the resume-line copy button, `file`
+// for "view log". Kept tiny so they live in two compact icon buttons.
+const ICON_COPY = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="9" height="10" rx="1.5"/><path d="M3 11V2.5A1.5 1.5 0 0 1 4.5 1H10"/></svg>`;
+const ICON_CHECK = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.5 3.5L13 5"/></svg>`;
+const ICON_LOG = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h7l3 3v9H3z"/><path d="M10 2v3h3"/><path d="M5 8h6M5 11h6"/></svg>`;
+
+function iconCopyBtn(sid) {
+  return `<button class="icon-btn" title="Copy: claude --resume ${sid}" aria-label="Copy resume command" onclick="copyResume('${sid}', this)">${ICON_COPY}</button>`;
+}
+function iconLogBtn(logPath) {
+  return `<button class="icon-btn" title="Open run log" aria-label="Open run log" onclick="openLog('${logPath}', this)">${ICON_LOG}</button>`;
+}
+
 function renderNow(state) {
-  const c = state.current;
-  if (!c) return '<div class="empty">— none</div>';
-  const startedTs = c.started_at ? new Date(c.started_at).getTime() : null;
-  const elapsed = startedTs ? (Date.now() - startedTs) / 1000 : 0;
+  // Multi-lane support: state.currents is an array of lane state objects.
+  // Fall back to the legacy single state.current for old payloads.
+  const currents = (Array.isArray(state.currents) && state.currents.length)
+    ? state.currents
+    : (state.current ? [state.current] : []);
+  if (!currents.length) {
+    const note = (state.parallel_lanes > 1)
+      ? `<div class="empty">— idle (${state.parallel_lanes} lanes ready)</div>`
+      : '<div class="empty">— none</div>';
+    return note;
+  }
+  if (currents.length === 1) {
+    return renderLaneCard(state, currents[0], /*showLanePill=*/false);
+  }
+  return `<div class="lanes-grid">` +
+    currents.map(c => renderLaneCard(state, c, /*showLanePill=*/true)).join('') +
+    `</div>`;
+}
+
+function renderLaneCard(state, c, showLanePill) {
+  const startedTs   = c.started_at ? new Date(c.started_at).getTime() : null;
+  const stageStarts = c.stage_started_at ? new Date(c.stage_started_at).getTime() : startedTs;
+  const elapsedTotal = startedTs ? (Date.now() - startedTs) / 1000 : 0;
+  const elapsedStage = stageStarts ? (Date.now() - stageStarts) / 1000 : 0;
   const cap = (c.cap_minutes || state.current_cap_minutes || 30) * 60;
-  const pct = cap ? Math.round(100 * elapsed / cap) : 0;
-  const klass = pct > 80 ? 'red' : (pct > 60 ? 'yellow' : 'green');
+
   const batchPill = c.batch_id
     ? `<span class="pill purple">batch:${escape(c.batch_id)}</span>` : '';
+  const modePill = c.mode === 'finish'
+    ? `<span class="pill yellow">finish</span>` : '';
+  const lanePill = showLanePill
+    ? `<span class="pill accent">lane ${c.lane || 1}</span>` : '';
   const sid = escape(c.session_id || '');
   const logPath = escape(c.log_path || '');
-  return `
-    <div class="grid3">
-      <div><strong>#${c.issue_number}</strong>${batchPill}</div>
-      <div class="truncate">${escape(c.issue_title || '')}</div>
-      <div class="small mono">${fmtDuration(elapsed)} / ${fmtDuration(cap)}</div>
-    </div>
-    <div style="margin-top:8px"><div class="bar ${klass}"><span style="width:${pct}%"></span></div></div>
+
+  const stageBar = renderStageBar(state, c);
+  const stageLabel = escape(c.stage || '?');
+  // The retry badge sits on the active dot — no need to repeat it in the
+  // meta line. Keep meta short.
+  const attemptHtml = '';
+
+  const sessionRow = sid ? `
     <div class="session-row">
       <span class="mono small truncate">claude --resume ${sid}</span>
-      <button onclick="openAgent('${sid}', this)">Open agent</button>
-      <button onclick="copyResume('${sid}', this)">Copy</button>
-      ${logPath ? `<button onclick="openLog('${logPath}', this)">View log</button>` : ''}
+      ${iconCopyBtn(sid)}
+      ${logPath ? iconLogBtn(logPath) : ''}
+    </div>` : (logPath ? `
+    <div class="session-row">
+      <span class="mono small dim truncate">no agent session — orchestrator op</span>
+      ${iconLogBtn(logPath)}
+    </div>` : `
+    <div class="session-row">
+      <span class="mono small dim truncate">no agent session — orchestrator op</span>
+    </div>`);
+
+  return `
+    <div class="lane-card">
+      <div class="grid3">
+        <div><strong>#${c.issue_number}</strong>${batchPill}${modePill}${lanePill}</div>
+        <div class="truncate">${escape(c.issue_title || '')}</div>
+        <div class="small mono">${fmtDuration(elapsedTotal)} / ${fmtDuration(cap)}</div>
+      </div>
+      ${stageBar}
+      <div class="stage-meta">
+        <div class="left">${stageLabel}${attemptHtml}</div>
+        <div class="right">${fmtDuration(elapsedStage)} in stage</div>
+      </div>
+      ${sessionRow}
     </div>
   `;
 }
@@ -1393,9 +1831,8 @@ function renderSingleRun(r) {
       ${sid ? `
       <div class="session-row">
         <span class="mono truncate">claude --resume ${sid}</span>
-        <button onclick="openAgent('${sid}', this)">Open agent</button>
-        <button onclick="copyResume('${sid}', this)">Copy</button>
-        ${logPath ? `<button onclick="openLog('${logPath}', this)">View log</button>` : ''}
+        ${iconCopyBtn(sid)}
+        ${logPath ? iconLogBtn(logPath) : ''}
       </div>` : ''}
     </div>
   `;
@@ -1453,9 +1890,8 @@ function renderBatchGroup(g) {
       ${sid ? `
       <div class="session-row">
         <span class="mono truncate">claude --resume ${sid}</span>
-        <button onclick="openAgent('${sid}', this)">Open agent</button>
-        <button onclick="copyResume('${sid}', this)">Copy</button>
-        ${logPath ? `<button onclick="openLog('${logPath}', this)">View latest log</button>` : ''}
+        ${iconCopyBtn(sid)}
+        ${logPath ? iconLogBtn(logPath) : ''}
       </div>` : ''}
     </div>
   `;
@@ -1470,19 +1906,6 @@ window.toggleAllRuns = toggleAllRuns;
 // ===========================================================================
 // Actions
 // ===========================================================================
-async function openAgent(sid, btn) {
-  try {
-    const r = await fetch('/api/open', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sid }),
-    });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) { alert('Could not open agent: ' + (body.error || r.status)); return; }
-    flashOK(btn, 'Opened');
-  } catch (e) { alert('Could not open agent: ' + e.message); }
-}
-window.openAgent = openAgent;
-
 async function copyResume(sid, btn) {
   try {
     const state = window.__lastState || {};
@@ -1491,7 +1914,7 @@ async function copyResume(sid, btn) {
     const cdPart = repo ? `cd '${repo}' && ` : '';
     const cmd = `${cdPart}${prefix}claude --resume ${sid}`;
     await navigator.clipboard.writeText(cmd);
-    flashOK(btn, 'Copied');
+    flashIcon(btn);
   } catch (e) { alert('Clipboard write failed: ' + e.message); }
 }
 window.copyResume = copyResume;
@@ -1504,17 +1927,21 @@ async function openLog(path, btn) {
     });
     const body = await r.json().catch(() => ({}));
     if (!r.ok) { alert('Could not open log: ' + (body.error || r.status)); return; }
-    flashOK(btn, 'Opened');
+    flashIcon(btn);
   } catch (e) { alert('Could not open log: ' + e.message); }
 }
 window.openLog = openLog;
 
-function flashOK(btn, msg) {
+// Flash a check-mark inside an icon-btn for ~1s then revert.
+function flashIcon(btn) {
   if (!btn) return;
-  const original = btn.textContent;
-  btn.textContent = msg;
-  btn.disabled = true;
-  setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1000);
+  const original = btn.innerHTML;
+  btn.classList.add('copied');
+  btn.innerHTML = ICON_CHECK;
+  setTimeout(() => {
+    btn.classList.remove('copied');
+    btn.innerHTML = original;
+  }, 900);
 }
 
 // ===========================================================================
@@ -1676,38 +2103,54 @@ async function saveSettings(ev) {
 window.saveSettings = saveSettings;
 
 // ===========================================================================
-// Main refresh loop
+// Main refresh loop — ETag-gated polling.
+//
+// Server returns 304 when state hasn't changed; we skip the re-render in
+// that case. With 304s being cheap, we can poll faster (1.5s) without
+// burning CPU or re-rendering on every tick. The "ticker" interval at
+// 250ms re-renders the Now card to keep the elapsed counter moving even
+// when state is unchanged.
 // ===========================================================================
 let lastError = null;
+let lastEtag = null;
+
+function applyState(state) {
+  window.__lastState = state;
+
+  $('#repo').textContent = state.repo + ' → ' + state.base_branch;
+
+  const pills = [];
+  if (state.claude_account) pills.push(`<span class="pill accent">${escape(state.claude_account)}</span>`);
+  pills.push(`<span class="pill">${escape(state.stop_after || 'merge')}</span>`);
+  if (state.auto_review) pills.push('<span class="pill green">auto-review</span>');
+  if (state.dry_run) pills.push('<span class="pill yellow">dry-run</span>');
+  if ((state.parallel_lanes || 1) > 1) {
+    pills.push(`<span class="pill purple">${state.parallel_lanes}× lanes</span>`);
+  }
+  $('#pills').innerHTML = pills.join('');
+
+  $('#now').innerHTML = renderNow(state);
+  $('#stats').innerHTML = renderStats(state);
+  renderChart(state);
+  $('#queue').innerHTML = renderQueue(state);
+  $('#runs').innerHTML = renderRuns(state);
+
+  if (document.getElementById('modal').classList.contains('open')) {
+    updateSaveEnabled();
+  }
+}
+
 async function refresh() {
   try {
-    const r = await fetch('/api/state', { cache: 'no-store' });
+    const headers = {};
+    if (lastEtag) headers['If-None-Match'] = lastEtag;
+    const r = await fetch('/api/state', { cache: 'no-store', headers });
+    if (r.status === 304) { lastError = null; return; }
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const state = await r.json();
     if (state.error) throw new Error(state.error);
-    window.__lastState = state;
-
-    $('#repo').textContent = state.repo + ' → ' + state.base_branch;
-
-    const pills = [];
-    if (state.claude_account) pills.push(`<span class="pill accent">${escape(state.claude_account)}</span>`);
-    pills.push(`<span class="pill">${escape(state.stop_after || 'merge')}</span>`);
-    if (state.auto_review) pills.push('<span class="pill green">auto-review</span>');
-    if (state.dry_run) pills.push('<span class="pill yellow">dry-run</span>');
-    $('#pills').innerHTML = pills.join('');
-
-    $('#now').innerHTML = renderNow(state);
-    $('#stats').innerHTML = renderStats(state);
-    renderChart(state);
-    $('#queue').innerHTML = renderQueue(state);
-    $('#runs').innerHTML = renderRuns(state);
-
-    // If the modal is open and was rendered before state arrived, the
-    // Save button is disabled — re-enable now that state is in.
-    if (document.getElementById('modal').classList.contains('open')) {
-      updateSaveEnabled();
-    }
-
+    lastEtag = r.headers.get('ETag');
+    applyState(state);
     lastError = null;
   } catch (e) {
     if (lastError !== e.message) {
@@ -1717,8 +2160,18 @@ async function refresh() {
   }
 }
 
+// Lightweight ticker — re-renders the "Now running" card from cached state
+// at 4 Hz so the elapsed counter and progress bar advance smoothly without
+// any server round-trip.
+function tickNow() {
+  const st = window.__lastState;
+  if (!st || !st.current) return;
+  $('#now').innerHTML = renderNow(st);
+}
+
 refresh();
-setInterval(refresh, 5000);
+setInterval(refresh, 1500);
+setInterval(tickNow, 250);
 </script>
 </body>
 </html>
