@@ -96,7 +96,13 @@ class Config:
     # Claude
     claude_config_dir: Path         # for transcript reads only
     claude_bin: str
-    pro_limit: int
+    # Plan caps — token-based. Anthropic does not publish exact numbers;
+    # the user fills these in from their own /usage view. When unset
+    # (None), the cockpit shows raw tokens without a percent bar.
+    session_token_limit: int | None = None
+    weekly_token_limit: int | None = None
+    # Minimum free session-tokens required before a burst-mode run starts.
+    burst_min_tokens: int = 100_000
     pro_window_seconds: int = 5 * 60 * 60
 
     # Behaviour
@@ -242,7 +248,30 @@ def load(start: Path | None = None) -> Config:
     claude_tbl = raw.get("claude") or {}
     claude_config_dir = _resolve_claude_config_dir(claude_tbl.get("config_dir"))
     claude_bin = _env_str("AO_CLAUDE_BIN", claude_tbl.get("bin", "claude"))
-    pro_limit = _env_int("AO_PRO_LIMIT", int(claude_tbl.get("pro_limit", 45)))
+
+    def _opt_int_limit(toml_key: str, env_key: str) -> int | None:
+        env_v = os.environ.get(env_key, "").strip()
+        if env_v:
+            try:
+                v = int(env_v.replace("_", ""))
+                return v if v > 0 else None
+            except ValueError:
+                raise SystemExit(f"{env_key} must be a positive integer, got {env_v!r}")
+        v = claude_tbl.get(toml_key)
+        if v is None:
+            return None
+        try:
+            iv = int(v)
+            return iv if iv > 0 else None
+        except (TypeError, ValueError):
+            raise SystemExit(f"[claude] {toml_key} must be a positive integer, got {v!r}")
+
+    session_token_limit = _opt_int_limit("session_token_limit", "AO_SESSION_TOKEN_LIMIT")
+    weekly_token_limit = _opt_int_limit("weekly_token_limit", "AO_WEEKLY_TOKEN_LIMIT")
+    burst_min_tokens = _env_int(
+        "AO_BURST_MIN_TOKENS",
+        int(burst_tbl.get("min_tokens", 100_000)),
+    )
 
     logs_tbl = raw.get("logs") or {}
     log_dir_raw = logs_tbl.get("dir")
@@ -272,7 +301,9 @@ def load(start: Path | None = None) -> Config:
         auto_review=auto_review,
         claude_config_dir=claude_config_dir,
         claude_bin=claude_bin,
-        pro_limit=pro_limit,
+        session_token_limit=session_token_limit,
+        weekly_token_limit=weekly_token_limit,
+        burst_min_tokens=burst_min_tokens,
         dry_run=dry_run,
         log_dir=log_dir,
     )
@@ -310,7 +341,9 @@ _PROXY_ATTRS = {
     "AUTO_REVIEW": "auto_review",
     "CLAUDE_CONFIG_DIR": "claude_config_dir",
     "CLAUDE_BIN": "claude_bin",
-    "PRO_LIMIT": "pro_limit",
+    "SESSION_TOKEN_LIMIT": "session_token_limit",
+    "WEEKLY_TOKEN_LIMIT": "weekly_token_limit",
+    "BURST_MIN_TOKENS": "burst_min_tokens",
     "PRO_WINDOW_SECONDS": "pro_window_seconds",
     "DRY_RUN": "dry_run",
     "LOG_DIR": "log_dir",

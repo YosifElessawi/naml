@@ -127,20 +127,60 @@ def _section_now_running(current: dict | None) -> list[str]:
     return lines
 
 
-def _section_pro_window() -> list[str]:
+def _fmt_tok(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
+def _usage_line(label: str, usage: claude_session.Usage, limit: int | None,
+                burst_min: int) -> list[str]:
+    if not usage.ok:
+        return [f"  ─ {label:<10} " + _yellow("no transcripts in this window")]
+    total = usage.total_tokens
+    reset = (f", resets in {_humanize(usage.reset_in_seconds)}"
+             if usage.reset_in_seconds is not None else "")
+    if limit:
+        pct = round(100 * total / limit) if limit else 0
+        tone = _green if (limit - total) > burst_min else (
+               _yellow if (limit - total) > 0 else _red)
+        bar = _bar(total, limit)
+        return [
+            f"  ─ {label:<10} {bar} {pct}% used"
+            f"  ({_fmt_tok(total)} / {_fmt_tok(limit)} tokens{reset})"
+            f"  cost ${usage.cost_usd:.2f}"
+        ]
+    # No cap configured — show raw counts only.
+    return [
+        f"  ─ {label:<10} " + _dim(f"{_fmt_tok(total)} tokens · ${usage.cost_usd:.2f}{reset}")
+    ]
+
+
+def _section_usage() -> list[str]:
     cfg = config.load()
-    est = claude_session.estimate()
-    lines = ["", _bold("Claude Pro window (5h rolling)")]
-    if not est.ok or est.used is None:
-        lines.append("  ─ " + _yellow(f"estimate unavailable — assuming limit {est.limit}"))
-        return lines
-    pct = round(100 * est.used / est.limit) if est.limit else 0
-    lines.append(f"  ─ Messages used:  {est.used} / {est.limit}".ljust(36) + f"{_bar(est.used, est.limit)} {pct}%")
-    if est.reset_in_seconds is not None:
-        lines.append(f"  ─ Window resets:  in {_humanize(est.reset_in_seconds)}")
-    headroom = est.headroom
-    tone = _green if (headroom or 0) > cfg.burst_min_headroom else _yellow
-    lines.append(f"  ─ Headroom:       {tone(str(headroom))} messages")
+    lines = ["", _bold("Usage (Claude plan)")]
+    session = claude_session.session_usage()
+    weekly = claude_session.weekly_usage()
+    lines.extend(_usage_line("Session", session, cfg.session_token_limit, cfg.burst_min_tokens))
+    lines.extend(_usage_line("Weekly",  weekly,  cfg.weekly_token_limit,  cfg.burst_min_tokens))
+    if not cfg.session_token_limit and not cfg.weekly_token_limit:
+        lines.append("  " + _dim("─ set [claude] session_token_limit / weekly_token_limit in TOML"))
+        lines.append("  " + _dim("    for accurate % bars (read your caps from Claude's /usage view)"))
+    return lines
+
+
+def _section_cost() -> list[str]:
+    today = claude_session.today_usage()
+    last30 = claude_session.thirty_day_usage()
+    lines = ["", _bold("Cost")]
+    if today.ok:
+        lines.append(f"  ─ Today           ${today.cost_usd:.2f}  ·  {_fmt_tok(today.total_tokens)} tokens")
+    if last30.ok:
+        lines.append(f"  ─ Last 30 days    ${last30.cost_usd:.2f}  ·  {_fmt_tok(last30.total_tokens)} tokens")
+    if not today.ok and not last30.ok:
+        lines.append("  " + _dim("─ no local transcripts found"))
     return lines
 
 
@@ -237,7 +277,8 @@ def render() -> str:
     out: list[str] = []
     out.extend(header)
     out.extend(_section_now_running(current))
-    out.extend(_section_pro_window())
+    out.extend(_section_usage())
+    out.extend(_section_cost())
     out.extend(_section_queue())
     out.extend(_section_recent(runs))
     out.append("")

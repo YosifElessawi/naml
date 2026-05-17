@@ -79,8 +79,11 @@ max_retries = 2
 [burst]
 max_issues   = 5
 max_hours    = 4
-# Stop the burst loop when fewer than this many Pro messages remain.
+# Legacy: min_headroom kept for back-compat (unused when token caps are
+# set). The new gate is token-based: burst stops when session-window
+# tokens remaining drops below `min_tokens`.
 min_headroom = 8
+min_tokens   = 100_000
 
 
 [batch]
@@ -106,12 +109,19 @@ auto_review = false
 
 
 [claude]
-pro_limit = 45
-bin       = "claude"
+bin = "claude"
 # Pin a specific Claude account dir for this project. If unset, the
 # orchestrator inherits CLAUDE_CONFIG_DIR from the shell that ran it
 # (and falls back to claude's own default, ~/.claude).
 # config_dir = "~/.claude-personal"
+
+# Plan caps — token-based, used to compute "% left" in the cockpit and
+# to gate burst mode on tight windows. Anthropic does not publish exact
+# numbers; the most reliable source is YOUR OWN `/usage` view in Claude
+# Code (Settings → Usage). Fill these in once and the bars become real.
+# Until set, the cockpit shows raw tokens used + cost without a percent.
+# session_token_limit = 5_000_000     # rolling 5h
+# weekly_token_limit  = 35_000_000    # rolling 7d
 
 
 # Optional. Default: ~/Library/Logs/agents-orchestrator/<slug-with-dashes>/

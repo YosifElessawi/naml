@@ -381,16 +381,37 @@ def process_one_batch(batch_id: str | None, issues: list[dict], mode: str) -> li
     return outcomes
 
 
-def _headroom_ok(est: claude_session.Estimate, mode: str) -> bool:
-    """Whether there is enough Pro headroom to start a run."""
+def _headroom_ok(mode: str) -> bool:
+    """Whether the session window has room to start a run.
+
+    Token-based: compares the configured session_token_limit against
+    tokens used in the rolling 5h window. When no limit is configured
+    (the common case for new setups), we trust the per-run wall-clock cap
+    as the real safety net and let the run proceed.
+    """
     cfg = config.load()
-    if mode == "burst":
-        if not est.ok or est.headroom is None:
-            return False
-        return est.headroom >= cfg.burst_min_headroom
-    if not est.ok or est.headroom is None:
+    headroom = claude_session.session_headroom_tokens()
+    if headroom is None:
+        # No cap configured — let it through. The run_cap_minutes wall-clock
+        # cap is the real limit anyway.
         return True
-    return est.headroom > 0
+    if mode == "burst":
+        return headroom >= cfg.burst_min_tokens
+    return headroom > 0
+
+
+def _headroom_msg() -> str:
+    cfg = config.load()
+    usage = claude_session.session_usage()
+    if not usage.ok:
+        return "no local transcripts found — headroom unknown, proceeding."
+    used = usage.total_tokens
+    if cfg.session_token_limit is None:
+        return (f"session cap unconfigured — {used:,} tokens used in the last 5h "
+                "(set [claude] session_token_limit in TOML for a real headroom check).")
+    headroom = max(0, cfg.session_token_limit - used)
+    return (f"session window: {used:,} / {cfg.session_token_limit:,} tokens used; "
+            f"headroom {headroom:,} (min {cfg.burst_min_tokens:,}).")
 
 
 # --- PR text + comments ---------------------------------------------------
@@ -493,9 +514,8 @@ def run_slow() -> int:
     cfg = config.load()
     _log(f"slow mode — processing at most one batch (stop_after={cfg.stop_after}).")
 
-    est = claude_session.estimate()
-    if not _headroom_ok(est, "slow"):
-        _log(f"Pro headroom too low (used {est.used}/{est.limit}) — bailing.")
+    if not _headroom_ok("slow"):
+        _log(_headroom_msg())
         return 0
 
     batch = _next_batch()
@@ -520,10 +540,8 @@ def run_burst() -> int:
         if time.time() >= deadline:
             _log(f"burst stop: hit wall-clock cap ({cfg.burst_max_hours}h).")
             break
-        est = claude_session.estimate()
-        if not _headroom_ok(est, "burst"):
-            _log(f"burst stop: Pro headroom below {cfg.burst_min_headroom} "
-                 f"(used {est.used}/{est.limit}).")
+        if not _headroom_ok("burst"):
+            _log("burst stop: " + _headroom_msg())
             break
 
         batch = _next_batch()

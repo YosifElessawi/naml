@@ -84,12 +84,36 @@ def _read_queue_cached() -> tuple[list[dict], str | None]:
             return [], err
 
 
+def _usage_to_dict(u: claude_session.Usage, *, limit: int | None = None) -> dict:
+    return {
+        "ok": u.ok,
+        "window_seconds": u.window_seconds,
+        "total_tokens": u.total_tokens,
+        "input_tokens": u.input_tokens,
+        "output_tokens": u.output_tokens,
+        "cache_read_tokens": u.cache_read_tokens,
+        "cache_write_5m_tokens": u.cache_write_5m_tokens,
+        "cache_write_1h_tokens": u.cache_write_1h_tokens,
+        "cost_usd": u.cost_usd,
+        "reset_in_seconds": u.reset_in_seconds,
+        "by_model": u.by_model,
+        "limit": limit,
+        "headroom": (max(0, limit - u.total_tokens) if limit else None),
+        "pct_used": (round(100 * u.total_tokens / limit, 1)
+                     if (limit and limit > 0) else None),
+    }
+
+
 def _build_state() -> dict:
     cfg = config.load()
     current = _read_current()
     runs = _read_runs(limit=20)
     queue, queue_err = _read_queue_cached()
-    est = claude_session.estimate()
+
+    session = claude_session.session_usage()
+    weekly = claude_session.weekly_usage()
+    today = claude_session.today_usage()
+    last30 = claude_session.thirty_day_usage()
 
     # Group queue by batch for the UI.
     queue_by_batch: dict[str | None, list[dict]] = {}
@@ -114,13 +138,13 @@ def _build_state() -> dict:
         "queue": queue,
         "queue_groups": queue_groups,
         "queue_error": queue_err,
-        "pro": {
-            "used": est.used,
-            "limit": est.limit,
-            "headroom": est.headroom,
-            "reset_in_seconds": est.reset_in_seconds,
-            "ok": est.ok,
-            "min_headroom": cfg.burst_min_headroom,
+        "usage": {
+            "session": _usage_to_dict(session, limit=cfg.session_token_limit),
+            "weekly": _usage_to_dict(weekly, limit=cfg.weekly_token_limit),
+            "today": _usage_to_dict(today),
+            "last_30_days": _usage_to_dict(last30),
+            "limits_configured": bool(cfg.session_token_limit or cfg.weekly_token_limit),
+            "burst_min_tokens": cfg.burst_min_tokens,
         },
     }
 
@@ -220,24 +244,28 @@ _INDEX_HTML = r"""<!doctype html>
   <title>agents-orchestrator</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --panel: #161b22;
-      --panel-2: #1c232b;
-      --border: #30363d;
-      --text: #e6edf3;
-      --muted: #8b949e;
+      --bg: #0e0e10;
+      --panel: #18181b;
+      --panel-2: #1f1f23;
+      --border: #2a2a2f;
+      --text: #e6e6ea;
+      --muted: #8a8a92;
+      --muted-2: #5b5b62;
       --accent: #58a6ff;
       --green: #3fb950;
       --yellow: #d29922;
       --red: #f85149;
       --purple: #bc8cff;
+      --bar-bg: #2a2a2f;
+      --bar-fill: #ec8a5d;   /* CodexBar coral for the usage bars */
+      --bar-reserve: #6b3c2a;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      font: 13px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text",
+      font: 13px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text",
             "Segoe UI", system-ui, sans-serif;
     }
     .wrap { max-width: 880px; margin: 0 auto; padding: 24px 20px 64px; }
@@ -260,6 +288,33 @@ _INDEX_HTML = r"""<!doctype html>
       text-transform: uppercase; color: var(--muted);
       margin: 0 0 10px 0;
     }
+    /* CodexBar-style usage row: big label, big bar, % left + reset on a
+       single subtitle line. */
+    .usage-row { margin: 14px 0 18px; }
+    .usage-row:first-child { margin-top: 4px; }
+    .usage-row .title {
+      font-size: 14px; font-weight: 600; color: var(--text);
+      margin-bottom: 8px;
+    }
+    .usage-row .subtitle {
+      display: flex; justify-content: space-between; align-items: baseline;
+      margin-top: 6px; font-size: 12px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .usage-row .subtitle .right { color: var(--muted-2); }
+    .ubar {
+      height: 10px; width: 100%;
+      background: var(--bar-bg); border-radius: 5px; overflow: hidden;
+      position: relative;
+    }
+    .ubar > span {
+      display: block; height: 100%;
+      background: var(--bar-fill);
+      transition: width 0.3s ease;
+    }
+    .ubar.unconfigured > span {
+      background: var(--muted-2);
+    }
     .row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
     .row + .row { border-top: 1px solid var(--border); }
     .row .label { flex: 0 0 auto; min-width: 60px; color: var(--muted); }
@@ -281,6 +336,22 @@ _INDEX_HTML = r"""<!doctype html>
     .bar.green > span { background: var(--green); }
     .bar.yellow > span { background: var(--yellow); }
     .bar.red > span { background: var(--red); }
+    .cost-row {
+      display: flex; justify-content: space-between;
+      padding: 10px 0; font-size: 12px;
+    }
+    .cost-row .left { color: var(--muted); }
+    .cost-row .right { color: var(--text); font-variant-numeric: tabular-nums; }
+    .cost-row + .cost-row { border-top: 1px solid var(--border); }
+    .config-hint {
+      font-size: 11px; color: var(--muted-2);
+      padding: 8px 10px;
+      background: rgba(255,255,255,0.02);
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      margin-top: 6px;
+    }
+    .config-hint code { color: var(--accent); background: transparent; padding: 0; }
     .pill {
       display: inline-block;
       padding: 1px 8px;
@@ -338,8 +409,13 @@ _INDEX_HTML = r"""<!doctype html>
     </div>
 
     <div class="section">
-      <h2>Claude Pro window (5h rolling)</h2>
-      <div id="pro"></div>
+      <h2>Usage</h2>
+      <div id="usage"></div>
+    </div>
+
+    <div class="section">
+      <h2>Cost</h2>
+      <div id="cost"></div>
     </div>
 
     <div class="section">
@@ -439,23 +515,89 @@ function renderNow(state) {
   `;
 }
 
-function renderPro(state) {
-  const p = state.pro;
-  if (!p || !p.ok || p.used == null) {
-    return '<div class="empty">estimate unavailable (no local transcripts yet)</div>';
+function usageRow(title, u, opts = {}) {
+  if (!u || !u.ok) {
+    return `
+      <div class="usage-row">
+        <div class="title">${title}</div>
+        <div class="ubar unconfigured"><span style="width:0%"></span></div>
+        <div class="subtitle"><span>no local transcripts in this window</span><span></span></div>
+      </div>
+    `;
   }
-  const pct = Math.round(100 * p.used / p.limit);
-  const klass = (p.headroom <= p.min_headroom) ? 'red'
-              : (p.headroom <= p.min_headroom * 2) ? 'yellow' : 'green';
-  const resetIn = p.reset_in_seconds != null ? fmtDuration(p.reset_in_seconds) : '—';
+  const reset = u.reset_in_seconds != null ? `resets in ${fmtDuration(u.reset_in_seconds)}` : '';
+  if (u.limit && u.pct_used != null) {
+    const pctLeft = Math.max(0, 100 - u.pct_used);
+    const fillPct = Math.min(100, u.pct_used);
+    return `
+      <div class="usage-row">
+        <div class="title">${title}</div>
+        <div class="ubar"><span style="width:${fillPct}%"></span></div>
+        <div class="subtitle">
+          <span><strong>${pctLeft.toFixed(0)}%</strong> left
+                <span class="right" style="margin-left:8px">${fmtTokens(u.total_tokens)} of ${fmtTokens(u.limit)} tokens</span></span>
+          <span class="right">${reset}</span>
+        </div>
+      </div>
+    `;
+  }
+  // No cap configured — show raw tokens, no fill (we don't know the denominator).
   return `
-    <div class="grid3">
-      <div class="small">Used</div>
-      <div>${bar(pct, klass)}</div>
-      <div class="small mono">${p.used} / ${p.limit}</div>
+    <div class="usage-row">
+      <div class="title">${title}</div>
+      <div class="ubar unconfigured"><span style="width:0%"></span></div>
+      <div class="subtitle">
+        <span>${fmtTokens(u.total_tokens)} tokens · ~$${(u.cost_usd || 0).toFixed(2)} <span class="right" style="margin-left:6px">(API retail est.)</span></span>
+        <span class="right">${reset}</span>
+      </div>
     </div>
-    <div class="small" style="margin-top:6px">
-      Headroom <strong>${p.headroom}</strong> · resets in ${resetIn}
+  `;
+}
+
+function renderUsage(state) {
+  const u = state.usage || {};
+  let out = '';
+  out += usageRow('Session (5h rolling)', u.session);
+  out += usageRow('Weekly (7d rolling)', u.weekly);
+  if (!u.limits_configured) {
+    out += `
+      <div class="config-hint">
+        Plan caps unconfigured — bars are placeholders. To get accurate
+        % bars, open Claude Code → <code>/usage</code>, read your session
+        + weekly limits, and add them to
+        <code>.agents-orchestrator.toml</code>:
+        <pre style="margin:6px 0 0;color:var(--muted);font-size:11px">[claude]
+session_token_limit = 5_000_000   # set to your plan's session cap
+weekly_token_limit  = 35_000_000  # set to your plan's weekly cap</pre>
+      </div>
+    `;
+  }
+  return out;
+}
+
+function renderCost(state) {
+  const u = state.usage || {};
+  const today = u.today || {};
+  const last30 = u.last_30_days || {};
+  function tokens(x) {
+    return x && x.ok ? fmtTokens(x.total_tokens) : '—';
+  }
+  function money(x) {
+    return x && x.ok ? `$${(x.cost_usd || 0).toFixed(2)}` : '—';
+  }
+  return `
+    <div class="cost-row">
+      <span class="left">Today</span>
+      <span class="right">${money(today)} · ${tokens(today)} tokens</span>
+    </div>
+    <div class="cost-row">
+      <span class="left">Last 30 days</span>
+      <span class="right">${money(last30)} · ${tokens(last30)} tokens</span>
+    </div>
+    <div class="config-hint" style="margin-top:10px">
+      Estimated at Anthropic's published API rates. Your actual Pro/Max bill
+      is fixed by subscription — these numbers tell you what the same work
+      would cost on the API.
     </div>
   `;
 }
@@ -533,7 +675,8 @@ async function refresh() {
     if (state.dry_run) flags.push('dry_run');
     $('#meta').textContent = flags.length ? flags.join(' · ') : '';
     $('#now').innerHTML = renderNow(state);
-    $('#pro').innerHTML = renderPro(state);
+    $('#usage').innerHTML = renderUsage(state);
+    $('#cost').innerHTML = renderCost(state);
     $('#queue').innerHTML = renderQueue(state);
     $('#runs').innerHTML = renderRuns(state);
     lastError = null;
