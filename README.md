@@ -1,4 +1,4 @@
-# Naml — نمل
+# Naml 
 
 > A colony of Claude Code agents that picks up triaged GitHub issues, drives a
 > session against each, validates locally, and ships PRs while you sleep.
