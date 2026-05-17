@@ -310,3 +310,49 @@ def weekly_headroom_tokens() -> int | None:
         return None
     used = weekly_usage().total_tokens
     return max(0, limit - used)
+
+
+# --- calibration ---------------------------------------------------------
+
+def back_solve_cap(used_tokens: int, pct_used: float,
+                   *, round_to_nearest: int = 1_000_000) -> int | None:
+    """Given current tokens used + the % reading from Claude's /usage view,
+    return the implied plan cap. Rounded up to a clean increment so the
+    suggested TOML value isn't a weird specific number.
+
+    Returns None for nonsense inputs (pct ≤ 0 or > 100, tokens 0)."""
+    if not isinstance(pct_used, (int, float)) or pct_used <= 0 or pct_used > 100:
+        return None
+    if used_tokens <= 0:
+        return None
+    raw = used_tokens / (pct_used / 100.0)
+    if round_to_nearest <= 0:
+        return int(raw)
+    # Round UP so we don't accidentally configure a cap below current usage.
+    chunks = (raw + round_to_nearest - 1) // round_to_nearest
+    return int(chunks * round_to_nearest)
+
+
+def calibrate(session_pct: float | None = None,
+              weekly_pct: float | None = None) -> dict:
+    """Build a calibration report: current tokens + the implied caps.
+
+    Use the result to update ``[claude] session_token_limit`` /
+    ``weekly_token_limit`` in the TOML.
+    """
+    s = session_usage()
+    w = weekly_usage()
+    return {
+        "session": {
+            "used_tokens": s.total_tokens,
+            "ok": s.ok,
+            "pct_used": session_pct,
+            "suggested_cap": back_solve_cap(s.total_tokens, session_pct) if session_pct else None,
+        },
+        "weekly": {
+            "used_tokens": w.total_tokens,
+            "ok": w.ok,
+            "pct_used": weekly_pct,
+            "suggested_cap": back_solve_cap(w.total_tokens, weekly_pct) if weekly_pct else None,
+        },
+    }

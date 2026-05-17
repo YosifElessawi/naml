@@ -624,6 +624,55 @@ def run_finish() -> int:
     return 0
 
 
+def run_calibrate(argv: list[str]) -> int:
+    """Back-solve session/weekly caps from the % reading shown in Claude's
+    own /usage view, then print TOML the user can paste.
+
+    Usage:
+        orchestrator.py calibrate <session_pct> [weekly_pct]
+    """
+    if not argv:
+        print("usage: orchestrator.py calibrate <session_pct> [weekly_pct]\n"
+              "  Read the % numbers from Claude Code's /usage view, then\n"
+              "  pass them here. Tokens are summed locally, caps are\n"
+              "  back-solved.", file=sys.stderr)
+        return 2
+    try:
+        s_pct = float(argv[0])
+        w_pct = float(argv[1]) if len(argv) > 1 else None
+    except ValueError:
+        print(f"calibrate: percentages must be numbers, got {argv!r}", file=sys.stderr)
+        return 2
+
+    report = claude_session.calibrate(session_pct=s_pct, weekly_pct=w_pct)
+    s = report["session"]
+    w = report["weekly"]
+
+    print("Current token usage (from your local transcripts):")
+    print(f"  session (5h):  {s['used_tokens']:>14,} tokens")
+    print(f"  weekly  (7d):  {w['used_tokens']:>14,} tokens")
+    print()
+
+    if s["suggested_cap"] is None and w["suggested_cap"] is None:
+        print("Nothing to suggest — pass at least one valid percentage (0 < pct ≤ 100).")
+        return 2
+
+    print("Implied plan caps:")
+    if s["suggested_cap"]:
+        print(f"  session: {s_pct}% used  →  ~{s['suggested_cap']:>14,} tokens")
+    if w["suggested_cap"] and w_pct is not None:
+        print(f"  weekly:  {w_pct}% used  →  ~{w['suggested_cap']:>14,} tokens")
+    print()
+    print("Paste this into your .agents-orchestrator.toml under [claude]:")
+    print()
+    print("[claude]")
+    if s["suggested_cap"]:
+        print(f"session_token_limit = {s['suggested_cap']:_}")
+    if w["suggested_cap"] and w_pct is not None:
+        print(f"weekly_token_limit  = {w['suggested_cap']:_}")
+    return 0
+
+
 def run_serve(argv: list[str]) -> int:
     """Start the local web cockpit."""
     # Late import — only needed in serve mode. Match the package-vs-script
@@ -652,6 +701,10 @@ Usage:
   orchestrator.py status    Print the status dashboard and exit.
   orchestrator.py serve [--port 7777]
                             Start the local web cockpit.
+  orchestrator.py calibrate <session_pct> [weekly_pct]
+                            Back-solve session/weekly token caps from the
+                            % readings in Claude's own /usage view.
+                            Prints TOML to paste into .agents-orchestrator.toml.
   orchestrator.py --help    Show this message.
 
 Per-project config lives in .agents-orchestrator.toml at the target repo's
@@ -696,6 +749,8 @@ def main(argv: list[str]) -> int:
         return run_finish()
     if cmd == "serve":
         return run_serve(args[1:])
+    if cmd == "calibrate":
+        return run_calibrate(args[1:])
 
     print(f"unknown subcommand: {cmd}\n", file=sys.stderr)
     print(_USAGE, file=sys.stderr)

@@ -352,6 +352,20 @@ _INDEX_HTML = r"""<!doctype html>
       margin-top: 6px;
     }
     .config-hint code { color: var(--accent); background: transparent; padding: 0; }
+    .config-hint .calib {
+      display: flex; gap: 10px; flex-wrap: wrap;
+      align-items: center; margin-top: 8px;
+    }
+    .config-hint .calib label {
+      display: inline-flex; align-items: center; gap: 4px;
+      color: var(--muted); font-size: 11px;
+    }
+    .config-hint .calib input {
+      width: 64px; padding: 3px 5px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      font: inherit; font-size: 11px;
+    }
     .pill {
       display: inline-block;
       padding: 1px 8px;
@@ -560,20 +574,56 @@ function renderUsage(state) {
   out += usageRow('Session (5h rolling)', u.session);
   out += usageRow('Weekly (7d rolling)', u.weekly);
   if (!u.limits_configured) {
+    const sessTok = u.session && u.session.ok ? u.session.total_tokens : 0;
+    const weekTok = u.weekly && u.weekly.ok ? u.weekly.total_tokens : 0;
     out += `
       <div class="config-hint">
-        Plan caps unconfigured — bars are placeholders. To get accurate
-        % bars, open Claude Code → <code>/usage</code>, read your session
-        + weekly limits, and add them to
-        <code>.agents-orchestrator.toml</code>:
-        <pre style="margin:6px 0 0;color:var(--muted);font-size:11px">[claude]
-session_token_limit = 5_000_000   # set to your plan's session cap
-weekly_token_limit  = 35_000_000  # set to your plan's weekly cap</pre>
+        Plan caps unconfigured. Calibrate from Claude's own
+        <code>/usage</code> view: type the % numbers it shows, get a
+        TOML snippet to paste.
+        <div class="calib">
+          <label>Session: <input id="calib-s" type="number" min="0" max="100" step="0.1" placeholder="e.g. 85"/>%</label>
+          <label>Weekly: <input id="calib-w" type="number" min="0" max="100" step="0.1" placeholder="e.g. 23"/>%</label>
+          <button onclick="calibrate(${sessTok}, ${weekTok})">Compute caps</button>
+        </div>
+        <pre id="calib-out" style="display:none;margin:8px 0 0;padding:8px;
+              background:var(--panel-2);border-radius:4px;
+              color:var(--text);font-size:11px;"></pre>
       </div>
     `;
   }
   return out;
 }
+
+function calibrate(sessTok, weekTok) {
+  const s = parseFloat(document.getElementById('calib-s').value);
+  const w = parseFloat(document.getElementById('calib-w').value);
+  const lines = ['[claude]'];
+  function backSolve(used, pct) {
+    if (!used || !pct || pct <= 0 || pct > 100) return null;
+    const raw = used / (pct / 100);
+    // Round up to the next 1M.
+    return Math.ceil(raw / 1_000_000) * 1_000_000;
+  }
+  function fmt(n) {
+    return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '_');
+  }
+  const sCap = backSolve(sessTok, s);
+  const wCap = backSolve(weekTok, w);
+  if (!sCap && !wCap) {
+    alert('Enter at least one valid % (0 < pct ≤ 100).');
+    return;
+  }
+  if (sCap) lines.push(`session_token_limit = ${fmt(sCap)}`);
+  if (wCap) lines.push(`weekly_token_limit  = ${fmt(wCap)}`);
+  lines.push('');
+  lines.push('# Paste this into .agents-orchestrator.toml under [claude],');
+  lines.push('# then reload this page.');
+  const el = document.getElementById('calib-out');
+  el.textContent = lines.join('\n');
+  el.style.display = 'block';
+}
+window.calibrate = calibrate;
 
 function renderCost(state) {
   const u = state.usage || {};
