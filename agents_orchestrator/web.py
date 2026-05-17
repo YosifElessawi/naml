@@ -704,6 +704,11 @@ _INDEX_HTML = r"""<!doctype html>
       margin-top: 2px; padding-left: 44px;
       overflow: hidden;
     }
+    .runs-toggle {
+      text-align: center; padding: 10px 0 2px;
+      border-top: 1px dashed var(--border);
+      margin-top: 8px;
+    }
     /* Settings form */
     .section h2 .hint {
       text-transform: none; letter-spacing: 0;
@@ -1398,8 +1403,37 @@ function renderQueue(state) {
 }
 
 function renderRuns(state) {
-  const runs = state.runs || [];
-  if (!runs.length) return '<div class="empty">— none yet</div>';
+  const allRuns = state.runs || [];
+  if (!allRuns.length) return '<div class="empty">— none yet</div>';
+
+  // Dedupe (unless toggled): keep only the most recent run per
+  // issue_number. Old failed/needs-info attempts get suppressed once a
+  // newer outcome lands. The JSONL ledger keeps full history; this is
+  // purely a UI filter so the cockpit reads as "current state".
+  const showAll = window.__showAllRuns === true;
+  let runs;
+  if (showAll) {
+    runs = allRuns;
+  } else {
+    const seen = new Set();
+    runs = [];
+    for (const r of allRuns) {           // newest-first already
+      if (seen.has(r.issue_number)) continue;
+      seen.add(r.issue_number);
+      runs.push(r);
+    }
+  }
+
+  const hiddenCount = allRuns.length - runs.length;
+  const toggle = `
+    <div class="runs-toggle small dim">
+      ${hiddenCount > 0 || showAll
+        ? `<button class="link" onclick="toggleAllRuns()" type="button">
+             ${showAll ? '↑ Hide history — show only latest per issue' : `↓ Show full history (${hiddenCount} older run${hiddenCount === 1 ? '' : 's'} hidden)`}
+           </button>`
+        : ''}
+    </div>
+  `;
 
   // Group consecutive runs that share (session_id, batch_id) — those are
   // the issues from one batched session and should render as one card.
@@ -1415,8 +1449,15 @@ function renderRuns(state) {
       groups.push(cur);
     }
   }
-  return groups.map(g => g.runs.length > 1 ? renderBatchGroup(g) : renderSingleRun(g.runs[0])).join('');
+  return groups.map(g => g.runs.length > 1 ? renderBatchGroup(g) : renderSingleRun(g.runs[0])).join('')
+       + toggle;
 }
+
+function toggleAllRuns() {
+  window.__showAllRuns = !(window.__showAllRuns === true);
+  refresh();
+}
+window.toggleAllRuns = toggleAllRuns;
 
 function renderSingleRun(r) {
   const outcome = r.outcome || '?';

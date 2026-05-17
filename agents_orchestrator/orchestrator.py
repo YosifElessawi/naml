@@ -624,6 +624,83 @@ def run_finish() -> int:
     return 0
 
 
+def run_clean(argv: list[str]) -> int:
+    """Archive old runs out of runs.jsonl into runs.archive.jsonl.
+
+    Default: keep the most recent record per issue_number, archive everything
+    else. With ``--all``, archive ALL records (full reset, for fresh starts).
+    With ``--dry-run``, just report what would change.
+
+    The cockpit's "Recent runs" view already hides superseded records by
+    default — this command is for trimming the JSONL itself when it grows.
+    """
+    archive_all = "--all" in argv
+    dry_run = "--dry-run" in argv
+
+    cfg = config.load()
+    if not cfg.runs_jsonl.exists():
+        print("(no runs.jsonl found)")
+        return 0
+
+    all_runs: list[dict] = []
+    for line in cfg.runs_jsonl.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            all_runs.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    if not all_runs:
+        print("(no records to clean)")
+        return 0
+
+    if archive_all:
+        keep: list[dict] = []
+        archive = list(all_runs)
+    else:
+        # Walk newest-first; keep only the FIRST record per issue_number.
+        seen = set()
+        keep_rev: list[dict] = []
+        archive: list[dict] = []
+        for r in reversed(all_runs):
+            n = r.get("issue_number")
+            if n in seen:
+                archive.append(r)
+            else:
+                seen.add(n)
+                keep_rev.append(r)
+        keep = list(reversed(keep_rev))
+
+    if dry_run:
+        print(f"dry-run: would keep {len(keep)}, archive {len(archive)}")
+        for r in archive[:10]:
+            print(f"  archive: #{r.get('issue_number')} {r.get('outcome')} @ {r.get('started_at', '')[:19]}")
+        if len(archive) > 10:
+            print(f"  ... and {len(archive) - 10} more")
+        return 0
+
+    if not archive:
+        print("(nothing to archive — already clean)")
+        return 0
+
+    archive_path = cfg.log_dir / "runs.archive.jsonl"
+    with archive_path.open("a", encoding="utf-8") as fh:
+        for r in archive:
+            fh.write(json.dumps(r) + "\n")
+
+    # Atomic rewrite of the live file.
+    tmp = cfg.runs_jsonl.with_suffix(cfg.runs_jsonl.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as fh:
+        for r in keep:
+            fh.write(json.dumps(r) + "\n")
+    tmp.replace(cfg.runs_jsonl)
+
+    print(f"kept {len(keep)} record(s), archived {len(archive)} → {archive_path}")
+    return 0
+
+
 def run_calibrate(argv: list[str]) -> int:
     """Back-solve plan caps and cost-multiplier from real numbers in Claude's
     own /usage view.
@@ -744,6 +821,10 @@ Usage:
                             Back-solve session/weekly token caps from the
                             % readings in Claude's own /usage view.
                             Prints TOML to paste into .agents-orchestrator.toml.
+  orchestrator.py clean [--all] [--dry-run]
+                            Archive old / superseded runs out of runs.jsonl.
+                            Default: keep only the latest run per issue.
+                            --all wipes the ledger entirely.
   orchestrator.py --help    Show this message.
 
 Per-project config lives in .agents-orchestrator.toml at the target repo's
@@ -790,6 +871,8 @@ def main(argv: list[str]) -> int:
         return run_serve(args[1:])
     if cmd == "calibrate":
         return run_calibrate(args[1:])
+    if cmd == "clean":
+        return run_clean(args[1:])
 
     print(f"unknown subcommand: {cmd}\n", file=sys.stderr)
     print(_USAGE, file=sys.stderr)

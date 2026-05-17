@@ -40,6 +40,12 @@ web: ## Start the local web cockpit (http://127.0.0.1:7777)
 finish: ## Merge PRs left open by an earlier stop_after run
 	$(AO) finish
 
+clean: ## Archive superseded run records (keeps the latest per issue)
+	$(AO) clean
+
+clean-all: ## Archive ALL run records — fresh ledger
+	$(AO) clean --all
+
 ao-install: ## Copy the launchd plist into ~/Library/LaunchAgents
 	@test -f $(PLIST) || { echo "no $(PLIST) in $$PWD — copy templates/launchd.plist.example and edit"; exit 1; }
 	cp $(PLIST) $(PLIST_DEST)
