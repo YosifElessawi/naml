@@ -564,16 +564,89 @@ def run_status() -> int:
     return 0
 
 
-def run_finish() -> int:
-    """Merge PRs that were left at the `pr` or `review` stop point and now
-    have a passing review.
+def _latest_session_id_for_issue(issue_number: int) -> str | None:
+    """Walk runs.jsonl backwards, return the session_id of the most recent
+    record for this issue (so we can resume the agent that originally did
+    the work)."""
+    cfg = config.load()
+    if not cfg.runs_jsonl.exists():
+        return None
+    for line in reversed(cfg.runs_jsonl.read_text(encoding="utf-8").splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if d.get("issue_number") == issue_number and d.get("session_id"):
+            return d["session_id"]
+    return None
 
-    For each issue labelled `agent-done` with a PR open + mergeable: merge it.
-    For each labelled `agent-done` but PR has un-resolved review requests:
-    skip (human still has work to do).
+
+def _try_rebase_branch(branch: str) -> tuple[bool, str]:
+    """Mechanical rebase attempt. Returns (success, detail).
+
+    On success the local branch is rebased onto origin/<base>; caller must
+    force-push to publish. On failure the rebase is aborted and the working
+    tree is restored.
     """
     cfg = config.load()
-    _log("finish mode — looking for stopped-at-pr/review issues to merge.")
+    try:
+        github_ops.git("fetch", "origin", cfg.base_branch)
+        try:
+            github_ops.git("fetch", "origin", branch)
+        except github_ops.GitError:
+            pass  # branch may exist only locally on first run
+        github_ops.git("checkout", "-B", branch, f"origin/{branch}")
+        github_ops.git("rebase", f"origin/{cfg.base_branch}")
+        return True, "rebased cleanly"
+    except github_ops.GitError as exc:
+        try:
+            github_ops.git("rebase", "--abort")
+        except github_ops.GitError:
+            pass
+        return False, str(exc).splitlines()[0][:160]
+
+
+def _compose_rebase_prompt(branch: str, base_branch: str, pr_url: str) -> str:
+    return f"""Your PR ({pr_url}) on branch `{branch}` was opened earlier in this \
+session. A sibling PR has since merged into `{base_branch}`, so the branch is \
+now in conflict.
+
+Rebase the branch onto `origin/{base_branch}` and resolve the conflicts.
+
+Steps:
+  1. `git fetch origin {base_branch}`
+  2. `git checkout {branch}`            (you may already be on it)
+  3. `git rebase origin/{base_branch}`
+  4. Resolve every conflict. The acceptance criteria for the original issue \
+still hold — preserve that work and integrate with whatever landed on \
+`{base_branch}`. Don't broaden scope.
+  5. After the rebase is clean, run the validation gates again to confirm \
+nothing regressed.
+  6. `git push --force-with-lease origin {branch}`
+
+End your final message with:
+  - "DONE:" when the branch is rebased, gates green, and force-pushed.
+  - "BLOCKED:" + reason if the conflict cannot be reconciled without \
+broadening scope or breaking the gates.
+
+Do not touch other branches. Do not open another PR — the existing one will \
+pick up the new commits."""
+
+
+def run_finish() -> int:
+    """Merge PRs left at agent-done. Rebases mechanically when possible;
+    resumes the agent's original session only when the rebase needs real
+    judgment.
+
+    Order: by issue number ascending — earlier issues land first, which is
+    usually what was intended when they were batched together.
+    """
+    cfg = config.load()
+    _log(f"finish mode — merging agent-done PRs (rebase + agent-resume on conflict)")
+
     try:
         issues = github_ops._gh_json([
             "issue", "list",
@@ -587,40 +660,136 @@ def run_finish() -> int:
         return 1
 
     if not issues:
-        _log("no issues labelled agent-done.")
+        _log("no issues at agent-done.")
         return 0
 
+    issues.sort(key=lambda i: i.get("number", 0))
+
     merged = 0
-    for issue in issues:
-        number = issue["number"]
-        # Find the PR linked from this issue.
+    skipped: list[tuple[int, str]] = []
+
+    for issue_summary in issues:
+        number = issue_summary["number"]
         try:
             prs = github_ops._gh_json([
-                "pr", "list",
-                "--state", "open",
+                "pr", "list", "--state", "open",
                 "--search", f"in:body Closes #{number}",
                 "--json", "number,url,headRefName,mergeable,mergeStateStatus",
                 "--limit", "5",
             ]) or []
         except github_ops.GhError as exc:
             _log(f"#{number}: could not find PR: {exc}")
+            skipped.append((number, f"PR lookup failed: {exc}"))
             continue
         if not prs:
-            _log(f"#{number}: no open PR found, skipping")
+            _log(f"#{number}: no open PR — assuming already merged or closed")
             continue
         pr = prs[0]
-        branch = pr.get("headRefName", "")
-        if pr.get("mergeable") == "CONFLICTING":
-            _log(f"#{number}: PR #{pr['number']} conflicts — skipping (resolve manually)")
+        branch = pr["headRefName"]
+        url = pr["url"]
+
+        # Plain merge if GitHub says it's clean.
+        if pr.get("mergeable") == "MERGEABLE":
+            try:
+                github_ops.merge_pr(branch)
+                github_ops.comment(number, f"✅ Finished — merged via `make finish`. {url}")
+                _log(f"#{number}: merged {url}")
+                merged += 1
+                continue
+            except github_ops.GhError as exc:
+                _log(f"#{number}: direct merge failed: {exc}")
+                skipped.append((number, f"direct merge failed: {exc}"))
+                continue
+
+        if pr.get("mergeable") != "CONFLICTING":
+            # UNKNOWN / DRAFT / whatever — leave it to a human.
+            state = pr.get("mergeStateStatus", "?")
+            _log(f"#{number}: mergeable={pr.get('mergeable')} state={state}, skipping")
+            skipped.append((number, f"not mergeable (state={state})"))
             continue
+
+        # Conflicting — mechanical rebase first.
+        _log(f"#{number}: PR {url} conflicts with {cfg.base_branch}, attempting mechanical rebase…")
+        ok, detail = _try_rebase_branch(branch)
+
+        if ok:
+            try:
+                github_ops.push_branch(branch)
+                time.sleep(2)  # let GitHub recompute mergeable status
+                github_ops.merge_pr(branch)
+                github_ops.comment(
+                    number,
+                    f"✅ Mechanically rebased onto `{cfg.base_branch}` and merged via "
+                    f"`make finish`. {url}",
+                )
+                _log(f"#{number}: rebased + merged {url}")
+                merged += 1
+                continue
+            except (github_ops.GhError, github_ops.GitError) as exc:
+                _log(f"#{number}: rebase ok but push/merge failed: {exc}")
+                skipped.append((number, f"rebase ok but push/merge failed: {exc}"))
+                continue
+
+        # Real conflict — resume the agent's session to resolve.
+        session_id = _latest_session_id_for_issue(number)
+        if not session_id:
+            _log(f"#{number}: rebase conflict, no prior agent session to resume — leaving for manual")
+            skipped.append((number, "rebase conflict; no agent session to resume"))
+            continue
+
+        _log(f"#{number}: rebase conflict ({detail}); resuming agent session {session_id}")
+        try:
+            issue_full = github_ops.get_issue(number)
+        except github_ops.GhError:
+            issue_full = issue_summary
+
+        run_id = _run_id(number)
+        log_path = cfg.log_dir / f"{run_id}.log"
+        prompt = _compose_rebase_prompt(branch, cfg.base_branch, url)
+        result = runner.run_agent(
+            prompt, session_id, run_id, log_path, issue_full, "finish",
+            resume=True,
+        )
+
+        if not result.completed or result.exit_code != 0:
+            _log(f"#{number}: agent rebase run failed (exit {result.exit_code}, timed_out={result.timed_out})")
+            skipped.append((number, "agent rebase failed"))
+            continue
+
+        # Re-poll PR state — give GitHub a moment.
+        time.sleep(3)
+        try:
+            refreshed = github_ops._gh_json([
+                "pr", "view", str(pr["number"]),
+                "--repo", cfg.repo,
+                "--json", "mergeable,mergeStateStatus",
+            ]) or {}
+        except github_ops.GhError as exc:
+            _log(f"#{number}: could not refresh PR after agent rebase: {exc}")
+            skipped.append((number, f"PR refresh failed: {exc}"))
+            continue
+
+        if refreshed.get("mergeable") != "MERGEABLE":
+            _log(f"#{number}: still {refreshed.get('mergeable')} after agent rebase — leaving for manual")
+            skipped.append((number, f"agent rebase didn't clear conflicts ({refreshed.get('mergeable')})"))
+            continue
+
         try:
             github_ops.merge_pr(branch)
-            github_ops.comment(number, f"✅ Finished — merged via `make finish`. {pr['url']}")
-            _log(f"#{number}: merged {pr['url']}")
+            github_ops.comment(
+                number,
+                f"✅ Agent-rebased onto `{cfg.base_branch}` and merged via "
+                f"`make finish`. {url}",
+            )
+            _log(f"#{number}: agent-rebased + merged {url}")
             merged += 1
         except github_ops.GhError as exc:
-            _log(f"#{number}: merge failed: {exc}")
-    _log(f"finish complete — {merged} PR(s) merged.")
+            _log(f"#{number}: post-rebase merge failed: {exc}")
+            skipped.append((number, f"post-rebase merge failed: {exc}"))
+
+    _log(f"finish complete — {merged} merged, {len(skipped)} skipped.")
+    for n, reason in skipped:
+        _log(f"  #{n}: {reason}")
     return 0
 
 
