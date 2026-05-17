@@ -683,6 +683,27 @@ _INDEX_HTML = r"""<!doctype html>
     .calib-actions button {
       padding: 4px 10px; font-size: 11px;
     }
+    /* Batched recent-run grouping */
+    .batch-list {
+      margin: 8px 0 4px;
+      padding: 8px 10px 4px;
+      background: rgba(255,255,255,0.025);
+      border-left: 2px solid var(--purple);
+      border-radius: 4px;
+    }
+    .batch-item + .batch-item {
+      border-top: 1px solid var(--border);
+      margin-top: 6px; padding-top: 6px;
+    }
+    .batch-item-head {
+      display: grid;
+      grid-template-columns: 36px 1fr auto;
+      gap: 8px; align-items: baseline;
+    }
+    .batch-item-detail {
+      margin-top: 2px; padding-left: 44px;
+      overflow: hidden;
+    }
     /* Settings form */
     .section h2 .hint {
       text-transform: none; letter-spacing: 0;
@@ -1379,36 +1400,122 @@ function renderQueue(state) {
 function renderRuns(state) {
   const runs = state.runs || [];
   if (!runs.length) return '<div class="empty">— none yet</div>';
-  return runs.map(r => {
+
+  // Group consecutive runs that share (session_id, batch_id) — those are
+  // the issues from one batched session and should render as one card.
+  const groups = [];
+  let cur = null;
+  for (const r of runs) {
+    if (r.batch_id && cur
+        && cur.session_id === r.session_id
+        && cur.batch_id === r.batch_id) {
+      cur.runs.push(r);
+    } else {
+      cur = { session_id: r.session_id, batch_id: r.batch_id, runs: [r] };
+      groups.push(cur);
+    }
+  }
+  return groups.map(g => g.runs.length > 1 ? renderBatchGroup(g) : renderSingleRun(g.runs[0])).join('');
+}
+
+function renderSingleRun(r) {
+  const outcome = r.outcome || '?';
+  const cls = outcome.replace(/[^a-z]/g, '-');
+  const dur = fmtDuration(r.duration_sec || 0);
+  const usage = fmtUsage(r.usage);
+  const pr = r.pr_url ? `· <a href="${escape(r.pr_url)}" target="_blank">PR</a>` : '';
+  const batchPill = r.batch_id
+    ? `<span class="pill purple">batch:${escape(r.batch_id)}</span>` : '';
+  return `
+    <div class="row" style="display:block">
+      <div class="grid3">
+        <div class="mono">#${r.issue_number}</div>
+        <div class="body truncate">${escape(r.issue_title || '')}${batchPill}</div>
+        <div class="right small">${dur}</div>
+      </div>
+      <div class="grid3" style="margin-top:4px">
+        <div class="outcome ${cls}">${escape(outcome)}</div>
+        <div class="small truncate">${escape(r.detail || '')} ${pr}</div>
+        <div class="right small">${escape(usage)}</div>
+      </div>
+      ${r.session_id ? `
+      <div class="session-row">
+        <span class="mono small truncate">claude --resume ${escape(r.session_id)}</span>
+        <button onclick="openAgent('${escape(r.session_id)}', this)">Open agent</button>
+        <button onclick="copyResume('${escape(r.session_id)}', this)">Copy</button>
+        ${r.log_path ? `<button onclick="openLog('${escape(r.log_path)}', this)">View log</button>` : ''}
+      </div>` : ''}
+    </div>
+  `;
+}
+
+function renderBatchGroup(g) {
+  // g.runs is newest-first within the group (which means highest batch_position
+  // first — issue 3, then 2, then 1 for a 3-issue batch). Reorder to natural
+  // batch order (ascending position) for clearer reading.
+  const items = [...g.runs].reverse();
+
+  // Aggregate token usage + cost across the batch.
+  const agg = items.reduce((a, r) => {
+    const u = r.usage || {};
+    a.inp += +u.input_tokens || 0;
+    a.out += +u.output_tokens || 0;
+    a.cost += +u.total_cost_usd || 0;
+    a.dur += +r.duration_sec || 0;
+    return a;
+  }, { inp: 0, out: 0, cost: 0, dur: 0 });
+
+  // Pick a shared log to view (the most recent, which is the last one in items).
+  const tail = items[items.length - 1];
+  const sid = tail.session_id || '';
+  const logPath = tail.log_path || '';
+  const issueNums = items.map(r => '#' + r.issue_number).join(', ');
+
+  const itemRows = items.map(r => {
     const outcome = r.outcome || '?';
     const cls = outcome.replace(/[^a-z]/g, '-');
-    const dur = fmtDuration(r.duration_sec || 0);
-    const usage = fmtUsage(r.usage);
-    const pr = r.pr_url ? `· <a href="${escape(r.pr_url)}" target="_blank">PR</a>` : '';
-    const batchPill = r.batch_id
-      ? `<span class="pill purple">batch:${escape(r.batch_id)}</span>` : '';
+    const pr = r.pr_url ? ` · <a href="${escape(r.pr_url)}" target="_blank">PR</a>` : '';
+    const u = fmtUsage(r.usage);
     return `
-      <div class="row" style="display:block">
-        <div class="grid3">
-          <div class="mono">#${r.issue_number}</div>
-          <div class="body truncate">${escape(r.issue_title || '')}${batchPill}</div>
-          <div class="right small">${dur}</div>
+      <div class="batch-item">
+        <div class="batch-item-head">
+          <span class="mono">#${r.issue_number}</span>
+          <span class="truncate body">${escape(r.issue_title || '')}</span>
+          <span class="outcome ${cls} small">${escape(outcome)}</span>
         </div>
-        <div class="grid3" style="margin-top:4px">
-          <div class="outcome ${cls}">${escape(outcome)}</div>
-          <div class="small truncate">${escape(r.detail || '')} ${pr}</div>
-          <div class="right small">${escape(usage)}</div>
+        <div class="batch-item-detail small dim">
+          ${escape(r.detail || '')}${pr}
+          ${u ? `<span style="float:right">${escape(u)}</span>` : ''}
         </div>
-        ${r.session_id ? `
-        <div class="session-row">
-          <span class="mono small truncate">claude --resume ${escape(r.session_id)}</span>
-          <button onclick="openAgent('${escape(r.session_id)}', this)">Open agent</button>
-          <button onclick="copyResume('${escape(r.session_id)}', this)">Copy</button>
-          ${r.log_path ? `<button onclick="openLog('${escape(r.log_path)}', this)">View log</button>` : ''}
-        </div>` : ''}
       </div>
     `;
   }).join('');
+
+  return `
+    <div class="row" style="display:block">
+      <div class="grid3">
+        <div>
+          <span class="pill purple">batch:${escape(g.batch_id)}</span>
+          <span class="small dim" style="margin-left:6px">${items.length} issues · ${issueNums}</span>
+        </div>
+        <div></div>
+        <div class="right small">${fmtDuration(agg.dur)}</div>
+      </div>
+      <div class="batch-list">${itemRows}</div>
+      <div class="grid3" style="margin-top:6px">
+        <div class="small dim">batch totals</div>
+        <div></div>
+        <div class="right small">${fmtTokens(agg.inp)} in / ${fmtTokens(agg.out)} out / $${agg.cost.toFixed(2)}</div>
+      </div>
+      ${sid ? `
+      <div class="session-row">
+        <span class="mono small truncate">claude --resume ${escape(sid)}</span>
+        <button onclick="openAgent('${escape(sid)}', this)">Open agent</button>
+        <button onclick="copyResume('${escape(sid)}', this)">Copy</button>
+        ${logPath ? `<button onclick="openLog('${escape(logPath)}', this)">View latest log</button>` : ''}
+      </div>` : ''}
+    </div>
+  `;
 }
 
 let lastError = null;
