@@ -64,7 +64,13 @@ def create_branch(name: str) -> None:
 
 
 def push_branch(name: str) -> None:
-    git("push", "-u", "origin", name)
+    """Push an agent-owned branch. Uses --force-with-lease because the
+    branch is cut fresh from origin/<base> on each run; a prior failed
+    run may have left a remote tip that diverged from the new local
+    history. The branch is named `agent/issue-N-…` and not collaborated
+    on, so overwriting it is safe — --force-with-lease still refuses if
+    someone else has pushed unrelated commits to it concurrently."""
+    git("push", "-u", "--force-with-lease", "origin", name)
 
 
 def diff_has_changes(branch: str) -> bool:
