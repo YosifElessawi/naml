@@ -275,13 +275,144 @@ _DAY_SECONDS = 24 * 60 * 60
 _THIRTY_DAYS = 30 * 24 * 60 * 60
 
 
+def _detect_session_anchor(timestamps: list[float], session_seconds: int,
+                            now: float) -> float | None:
+    """Find the start of the current session.
+
+    Claude's session is NOT a sliding 5h window — it's anchored at the start
+    of the current burst of activity and lasts ``session_seconds`` from that
+    anchor. A "burst" is a contiguous run of assistant turns where no gap
+    exceeds ``session_seconds``.
+
+    Algorithm:
+      - If the most recent entry is older than ``session_seconds`` ago,
+        there is no active session (returns None).
+      - Otherwise walk backward through the sorted timestamps; the anchor is
+        the first timestamp whose predecessor is more than ``session_seconds``
+        earlier (or the very first timestamp if no such gap exists).
+    """
+    if not timestamps:
+        return None
+    ts = sorted(timestamps)
+    if now - ts[-1] > session_seconds:
+        return None
+    anchor = ts[0]
+    for i in range(1, len(ts)):
+        if ts[i] - ts[i - 1] > session_seconds:
+            anchor = ts[i]
+    return anchor
+
+
+def _parse_reset_iso(s: str | None) -> float | None:
+    if not s:
+        return None
+    try:
+        # Accept ISO datetimes with or without timezone. Treat naive as local.
+        s2 = s.strip().replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s2)
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt.timestamp()
+    except (ValueError, AttributeError):
+        return None
+
+
+def _next_reset_after(seed_ts: float, window_seconds: int, now: float) -> float:
+    """Snap a seed reset-time onto the reset series that contains ``now``.
+
+    We want the smallest R from {seed + k*window | k ∈ ℤ} such that
+    R - window_seconds <= now < R — that is, the END of the CURRENT
+    session window. The series of resets is periodic in window_seconds; we
+    roll the seed forward OR backward to land in the right spot.
+    """
+    reset = seed_ts
+    # Pull back if the seed is too far in the future (the actual current
+    # session ended before this seed).
+    while reset - window_seconds > now:
+        reset -= window_seconds
+    # Push forward if the seed is in the past or right at now.
+    while reset <= now:
+        reset += window_seconds
+    return reset
+
+
+def _window_between(cutoff: float, now: float, window_seconds: int) -> Usage:
+    """Sum tokens in [cutoff, now]. Reset countdown is window_seconds -
+    (now - cutoff). Shared helper for session and weekly when a reset is
+    configured."""
+    cfg = config.load()
+    projects = cfg.claude_config_dir / "projects"
+    if not projects.is_dir():
+        return Usage(window_seconds=window_seconds, ok=False)
+
+    inp = out = cache_r = cw_5m = cw_1h = 0
+    cost = 0.0
+    by_model: dict[str, dict] = {}
+    seen_any = False
+    for ts, model, usage in _iter_assistant_usage(projects):
+        seen_any = True
+        if ts < cutoff or ts > now:
+            continue
+        i = int(usage.get("input_tokens", 0) or 0)
+        o = int(usage.get("output_tokens", 0) or 0)
+        cr = int(usage.get("cache_read_input_tokens", 0) or 0)
+        c5, c1 = _split_cache_writes(usage)
+        inp += i; out += o; cache_r += cr; cw_5m += c5; cw_1h += c1
+        cost += _cost_for(model, inp=i, out=o, cache_read=cr, cw_5m=c5, cw_1h=c1)
+        row = by_model.setdefault(model, _empty_model_row())
+        row["input_tokens"] += i
+        row["output_tokens"] += o
+        row["cache_read_tokens"] += cr
+        row["cache_write_5m_tokens"] += c5
+        row["cache_write_1h_tokens"] += c1
+        row["cost_usd"] += _cost_for(model, inp=i, out=o, cache_read=cr, cw_5m=c5, cw_1h=c1)
+    for row in by_model.values():
+        row["cost_usd"] = round(row["cost_usd"], 4)
+
+    if not seen_any:
+        return Usage(window_seconds=window_seconds, ok=False)
+    return Usage(
+        window_seconds=window_seconds, ok=True,
+        input_tokens=inp, output_tokens=out, cache_read_tokens=cache_r,
+        cache_write_5m_tokens=cw_5m, cache_write_1h_tokens=cw_1h,
+        cost_usd=round(cost, 4),
+        oldest_age_seconds=int(now - cutoff),
+        by_model=by_model,
+    )
+
+
 def session_usage() -> Usage:
-    """Rolling 5-hour window."""
+    """Active session window.
+
+    Preferred path: the user has set ``[claude] session_reset_at`` in TOML
+    (read straight off Claude's /usage view — "Resets 9:50am"). We roll that
+    timestamp forward by 5h until it's in the future, then count tokens in
+    [reset - 5h, now]. Exact match for what Claude shows.
+
+    Fallback when no reset is configured: rolling 5h window. Less accurate
+    for continuously-active users (gap detection fails for those), but
+    something sensible to render before calibration.
+    """
+    cfg = config.load()
+    now = time.time()
+    seed = _parse_reset_iso(cfg.session_reset_at)
+    if seed is not None:
+        reset_at = _next_reset_after(seed, _SESSION_SECONDS, now)
+        cutoff = reset_at - _SESSION_SECONDS
+        return _window_between(cutoff, now, _SESSION_SECONDS)
     return _window(_SESSION_SECONDS)
 
 
 def weekly_usage() -> Usage:
-    """Rolling 7-day window."""
+    """Weekly window — uses ``weekly_reset_at`` when configured (rolls
+    forward by 7d), otherwise a rolling 7d fallback."""
+    cfg = config.load()
+    now = time.time()
+    seed = _parse_reset_iso(cfg.weekly_reset_at)
+    if seed is not None:
+        reset_at = _next_reset_after(seed, _WEEK_SECONDS, now)
+        cutoff = reset_at - _WEEK_SECONDS
+        return _window_between(cutoff, now, _WEEK_SECONDS)
     return _window(_WEEK_SECONDS)
 
 

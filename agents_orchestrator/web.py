@@ -137,6 +137,18 @@ def _build_state() -> dict:
         "dry_run": cfg.dry_run,
         "claude_account": claude_account,
         "claude_config_dir": str(cfg.claude_config_dir),
+        "settings": {
+            "pipeline.stop_after": cfg.stop_after,
+            "pipeline.auto_review": cfg.auto_review,
+            "claude.config_dir": str(cfg.claude_config_dir),
+            "claude.session_token_limit": cfg.session_token_limit,
+            "claude.weekly_token_limit": cfg.weekly_token_limit,
+            "claude.session_reset_at": cfg.session_reset_at,
+            "claude.weekly_reset_at": cfg.weekly_reset_at,
+            "claude.cost_calibration": cfg.cost_calibration,
+            "run.cap_minutes": cfg.run_cap_minutes,
+            "run.max_retries": cfg.max_retries,
+        },
         "now": datetime.now(timezone.utc).isoformat(),
         "current": current,
         "current_cap_minutes": cfg.run_cap_minutes,
@@ -209,6 +221,9 @@ class _Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "not found"}, status=404)
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/api/config":
+            self._handle_config_post()
+            return
         if self.path != "/api/open":
             self._send_json({"error": "not found"}, status=404)
             return
@@ -252,6 +267,144 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": f"failed to open Terminal: {exc.stderr.strip()}"}, status=500)
             return
         self._send_json({"ok": True})
+
+    def _handle_config_post(self) -> None:
+        """Persist UI-editable settings back into .agents-orchestrator.toml.
+
+        Only a whitelist of safe scalar fields is editable through the UI.
+        Anything else has to be hand-edited in the file.
+        """
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+        try:
+            payload = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            self._send_json({"error": "invalid JSON"}, status=400)
+            return
+        if not isinstance(payload, dict):
+            self._send_json({"error": "payload must be a JSON object"}, status=400)
+            return
+
+        try:
+            edits = _validate_config_edits(payload)
+        except ValueError as exc:
+            self._send_json({"error": str(exc)}, status=400)
+            return
+
+        if not edits:
+            self._send_json({"ok": True, "changed": 0})
+            return
+
+        try:
+            path = config.config_path()
+            config.edit_toml(path, edits)
+            config.reset_cache()
+        except Exception as exc:
+            self._send_json({"error": f"could not write TOML: {exc}"}, status=500)
+            return
+        self._send_json({"ok": True, "changed": len(edits), "path": str(path)})
+
+
+# Editable-field whitelist with type validation. Keys here are
+# "<section>.<key>" as the form sends them; values are converted to the
+# correct Python type before being passed to edit_toml.
+def _validate_config_edits(payload: dict) -> dict[tuple[str | None, str], Any]:
+    edits: dict[tuple[str | None, str], Any] = {}
+    for key, raw in payload.items():
+        if not isinstance(key, str) or "." not in key:
+            raise ValueError(f"unknown setting: {key!r}")
+        section, name = key.split(".", 1)
+        spec = _EDITABLE.get((section, name))
+        if not spec:
+            raise ValueError(f"setting {key!r} is not UI-editable")
+        # Empty string / None means: clear the override (re-comment the line).
+        if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+            edits[(section, name)] = None
+            continue
+        try:
+            v = spec(raw)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"{key}: {exc}") from None
+        edits[(section, name)] = v
+    return edits
+
+
+def _enum(*choices: str):
+    def _check(v):
+        if v not in choices:
+            raise ValueError(f"must be one of {choices}")
+        return v
+    return _check
+
+
+def _pos_int(v):
+    n = int(v)
+    if n <= 0:
+        raise ValueError("must be > 0")
+    return n
+
+
+def _nonneg_int(v):
+    n = int(v)
+    if n < 0:
+        raise ValueError("must be >= 0")
+    return n
+
+
+def _pos_float(v):
+    f = float(v)
+    if f <= 0:
+        raise ValueError("must be > 0")
+    return f
+
+
+def _bool(v):
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.lower() in {"1", "true", "yes", "on"}
+    return bool(v)
+
+
+def _path_str(v):
+    s = str(v).strip()
+    if not s:
+        raise ValueError("path required")
+    return s
+
+
+# (section, key) → coercer
+def _iso_dt(v):
+    """Accept a datetime-local string (`YYYY-MM-DDTHH:MM`) OR full ISO and
+    store it as ISO with timezone. We don't trust an HTML datetime-local
+    field to carry tz info, so we anchor it to the server's local zone."""
+    s = str(v).strip()
+    if not s:
+        raise ValueError("empty datetime")
+    try:
+        from datetime import datetime as _dt
+        # If TZ included, parse directly.
+        s2 = s.replace("Z", "+00:00")
+        dt = _dt.fromisoformat(s2)
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt.isoformat()
+    except ValueError:
+        raise ValueError("must be ISO 8601 (e.g. 2026-05-17T09:50:00)")
+
+
+_EDITABLE: dict[tuple[str, str], Any] = {
+    ("pipeline", "stop_after"): _enum("pr", "review", "merge"),
+    ("pipeline", "auto_review"): _bool,
+    ("claude", "config_dir"): _path_str,
+    ("claude", "session_token_limit"): _pos_int,
+    ("claude", "weekly_token_limit"): _pos_int,
+    ("claude", "session_reset_at"): _iso_dt,
+    ("claude", "weekly_reset_at"): _iso_dt,
+    ("claude", "cost_calibration"): _pos_float,
+    ("run", "cap_minutes"): _pos_int,
+    ("run", "max_retries"): _nonneg_int,
+}
 
 
 # --- index.html (embedded) ------------------------------------------------
@@ -386,6 +539,69 @@ _INDEX_HTML = r"""<!doctype html>
       border: 1px solid var(--border); border-radius: 4px;
       font: inherit; font-size: 11px;
     }
+    /* Settings form */
+    .section h2 .hint {
+      text-transform: none; letter-spacing: 0;
+      font-weight: 400; font-size: 11px;
+      color: var(--muted-2); margin-left: 8px;
+    }
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px 12px;
+      margin: 0;
+      background: rgba(255,255,255,0.015);
+    }
+    legend {
+      padding: 0 6px;
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.5px; text-transform: uppercase;
+      color: var(--muted);
+    }
+    fieldset label.block { display: block; margin: 8px 0 0; }
+    fieldset label.block > span {
+      display: block; font-size: 11px; color: var(--muted);
+      margin-bottom: 3px;
+    }
+    fieldset label.check {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text); margin: 10px 0 0;
+      cursor: pointer;
+    }
+    fieldset label.check input { accent-color: var(--accent); }
+    fieldset input[type="number"],
+    fieldset input[type="text"],
+    fieldset select {
+      width: 100%;
+      padding: 5px 8px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font: inherit; font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    fieldset select:focus, fieldset input:focus {
+      outline: none; border-color: var(--accent);
+    }
+    .custom-path { margin-top: 6px; }
+    .settings-actions {
+      display: flex; align-items: center; gap: 12px;
+      padding-top: 6px;
+    }
+    .settings-actions button {
+      padding: 6px 14px; font-size: 12px; font-weight: 500;
+      background: var(--accent); color: #0d1117;
+      border: 1px solid var(--accent);
+    }
+    .settings-actions button:hover { filter: brightness(1.1); }
+    .dim { color: var(--muted-2); }
     .pill {
       display: inline-block;
       padding: 1px 8px;
@@ -460,6 +676,99 @@ _INDEX_HTML = r"""<!doctype html>
     <div class="section">
       <h2>Recent runs</h2>
       <div id="runs"></div>
+    </div>
+
+    <div class="section">
+      <h2>Settings <span class="hint">writes to .agents-orchestrator.toml</span></h2>
+      <form id="settings-form" onsubmit="return saveSettings(event)">
+        <div class="settings-grid">
+          <fieldset>
+            <legend>Pipeline</legend>
+            <label class="block">
+              <span>Stop after</span>
+              <select name="pipeline.stop_after">
+                <option value="pr">pr — open PR, don't merge</option>
+                <option value="review">review — PR + auto-review</option>
+                <option value="merge">merge — full pipeline</option>
+              </select>
+            </label>
+            <label class="check">
+              <input type="checkbox" name="pipeline.auto_review">
+              <span>Auto-review before merge</span>
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Account</legend>
+            <label class="block">
+              <span>Claude config dir</span>
+              <select name="claude.config_dir_preset" onchange="onAcctChange(this)">
+                <option value="~/.claude">~/.claude (default / work)</option>
+                <option value="~/.claude-personal">~/.claude-personal</option>
+                <option value="__custom__">Custom path…</option>
+              </select>
+            </label>
+            <input class="custom-path" type="text" name="claude.config_dir" placeholder="/abs/path or ~/.claude-foo" style="display:none">
+          </fieldset>
+
+          <fieldset>
+            <legend>Plan caps</legend>
+            <label class="block">
+              <span>Session tokens (5h)</span>
+              <input type="number" name="claude.session_token_limit" min="0" step="1000000">
+            </label>
+            <label class="block">
+              <span>Weekly tokens (7d)</span>
+              <input type="number" name="claude.weekly_token_limit" min="0" step="10000000">
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Reset anchors</legend>
+            <div class="small dim" style="margin-bottom:6px">
+              Read off Claude's <code>/usage</code> (e.g. "Resets 9:50am"). Set once;
+              auto-rolls forward.
+            </div>
+            <label class="block">
+              <span>Next session reset</span>
+              <input type="datetime-local" name="claude.session_reset_at">
+            </label>
+            <label class="block">
+              <span>Next weekly reset</span>
+              <input type="datetime-local" name="claude.weekly_reset_at">
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend>Cost</legend>
+            <label class="block">
+              <span>Calibration multiplier</span>
+              <input type="number" name="claude.cost_calibration" min="0.001" step="0.001">
+            </label>
+            <div class="small dim">1.0 = use baked-in prices as-is.</div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Run caps</legend>
+            <label class="block">
+              <span>Cap (minutes)</span>
+              <input type="number" name="run.cap_minutes" min="1">
+            </label>
+            <label class="block">
+              <span>Retries on gate failure</span>
+              <input type="number" name="run.max_retries" min="0">
+            </label>
+          </fieldset>
+        </div>
+
+        <div class="settings-actions">
+          <button type="submit">Save changes</button>
+          <span id="settings-status" class="small dim"></span>
+          <span class="small dim" style="margin-left:auto">
+            Gates, labels, batch and burst caps live in the TOML file.
+          </span>
+        </div>
+      </form>
     </div>
   </div>
 
@@ -645,6 +954,128 @@ function calibrate(sessTok, weekTok) {
 }
 window.calibrate = calibrate;
 
+// --- Settings form ---------------------------------------------------------
+
+let _settingsDirty = false;
+const FORM = () => document.getElementById('settings-form');
+
+function onAcctChange(sel) {
+  const custom = FORM().querySelector('.custom-path');
+  if (sel.value === '__custom__') {
+    custom.style.display = '';
+    custom.focus();
+  } else {
+    custom.style.display = 'none';
+    custom.value = sel.value;
+  }
+}
+window.onAcctChange = onAcctChange;
+
+function syncSettingsForm(state) {
+  // Don't clobber edits in progress.
+  if (_settingsDirty) return;
+  const f = FORM();
+  if (!f) return;
+  const s = state.settings || {};
+  for (const [k, v] of Object.entries(s)) {
+    const el = f.querySelector(`[name="${k}"]`);
+    if (!el) continue;
+    if (el.type === 'checkbox') {
+      el.checked = !!v;
+    } else if (v == null) {
+      el.value = '';
+    } else if (el.type === 'datetime-local') {
+      // datetime-local needs `YYYY-MM-DDTHH:MM` in LOCAL time (no tz).
+      try {
+        const d = new Date(v);
+        if (!isNaN(d.getTime())) {
+          const pad = n => String(n).padStart(2, '0');
+          el.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        } else {
+          el.value = '';
+        }
+      } catch (e) {
+        el.value = '';
+      }
+    } else {
+      el.value = v;
+    }
+  }
+  // Account selector: preset vs custom.
+  const dir = s['claude.config_dir'] || '';
+  const preset = f.querySelector('[name="claude.config_dir_preset"]');
+  const custom = f.querySelector('.custom-path');
+  const known = ['~/.claude', '~/.claude-personal'];
+  const normalized = dir.replace(/\/Users\/[^/]+\//, '~/');
+  if (known.includes(normalized)) {
+    preset.value = normalized;
+    custom.style.display = 'none';
+    custom.value = normalized;
+  } else {
+    preset.value = '__custom__';
+    custom.style.display = '';
+    custom.value = dir;
+  }
+  // Once we've populated, listen for any change to mark dirty.
+  if (!f._wired) {
+    f.addEventListener('input', () => { _settingsDirty = true; });
+    f.addEventListener('change', () => { _settingsDirty = true; });
+    f._wired = true;
+  }
+}
+
+async function saveSettings(ev) {
+  ev.preventDefault();
+  const f = FORM();
+  const status = document.getElementById('settings-status');
+  const data = new FormData(f);
+  const payload = {};
+
+  // Convert form fields into the wire format.
+  const stop = data.get('pipeline.stop_after');
+  if (stop) payload['pipeline.stop_after'] = stop;
+  payload['pipeline.auto_review'] = f.querySelector('[name="pipeline.auto_review"]').checked;
+
+  // Account: use custom field's value (preset onchange syncs it).
+  const dir = (data.get('claude.config_dir') || '').trim();
+  if (dir) payload['claude.config_dir'] = dir;
+
+  for (const key of ['claude.session_token_limit', 'claude.weekly_token_limit',
+                     'claude.cost_calibration', 'run.cap_minutes', 'run.max_retries']) {
+    const raw = data.get(key);
+    payload[key] = raw === '' || raw == null ? null : Number(raw);
+  }
+  for (const key of ['claude.session_reset_at', 'claude.weekly_reset_at']) {
+    const raw = (data.get(key) || '').trim();
+    payload[key] = raw === '' ? null : raw;
+  }
+
+  status.textContent = 'saving…';
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      status.textContent = 'error: ' + (body.error || r.status);
+      status.style.color = 'var(--red)';
+      return false;
+    }
+    status.textContent = `saved (${body.changed} field${body.changed === 1 ? '' : 's'})`;
+    status.style.color = 'var(--green)';
+    _settingsDirty = false;
+    setTimeout(() => { status.textContent = ''; status.style.color = ''; }, 3000);
+    refresh();
+  } catch (e) {
+    status.textContent = 'error: ' + e.message;
+    status.style.color = 'var(--red)';
+  }
+  return false;
+}
+window.saveSettings = saveSettings;
+
 function renderCost(state) {
   const u = state.usage || {};
   const today = u.today || {};
@@ -752,6 +1183,7 @@ async function refresh() {
     $('#cost').innerHTML = renderCost(state);
     $('#queue').innerHTML = renderQueue(state);
     $('#runs').innerHTML = renderRuns(state);
+    syncSettingsForm(state);
     lastError = null;
   } catch (e) {
     if (lastError !== e.message) {

@@ -101,6 +101,13 @@ class Config:
     # (None), the cockpit shows raw tokens without a percent bar.
     session_token_limit: int | None = None
     weekly_token_limit: int | None = None
+    # ISO-8601 datetime of the NEXT session reset, as shown in Claude's
+    # /usage view ("Resets 9:50am" → e.g. "2026-05-17T09:50:00+02:00").
+    # The cockpit rolls this forward in memory by 5h once it passes — so
+    # you only have to set it once per account.
+    session_reset_at: str | None = None
+    # Same for the weekly reset ("Resets May 23 at 4pm" → ISO datetime).
+    weekly_reset_at: str | None = None
     # Minimum free session-tokens required before a burst-mode run starts.
     burst_min_tokens: int = 100_000
     # Multiplier applied to the computed (API-retail) cost so users on
@@ -272,6 +279,18 @@ def load(start: Path | None = None) -> Config:
 
     session_token_limit = _opt_int_limit("session_token_limit", "AO_SESSION_TOKEN_LIMIT")
     weekly_token_limit = _opt_int_limit("weekly_token_limit", "AO_WEEKLY_TOKEN_LIMIT")
+
+    def _opt_str(toml_key: str, env_key: str) -> str | None:
+        env_v = os.environ.get(env_key, "").strip()
+        if env_v:
+            return env_v
+        v = claude_tbl.get(toml_key)
+        if v is None:
+            return None
+        return str(v).strip() or None
+
+    session_reset_at = _opt_str("session_reset_at", "AO_SESSION_RESET_AT")
+    weekly_reset_at = _opt_str("weekly_reset_at", "AO_WEEKLY_RESET_AT")
     burst_min_tokens = _env_int(
         "AO_BURST_MIN_TOKENS",
         int(burst_tbl.get("min_tokens", 100_000)),
@@ -321,6 +340,8 @@ def load(start: Path | None = None) -> Config:
         claude_bin=claude_bin,
         session_token_limit=session_token_limit,
         weekly_token_limit=weekly_token_limit,
+        session_reset_at=session_reset_at,
+        weekly_reset_at=weekly_reset_at,
         burst_min_tokens=burst_min_tokens,
         cost_calibration=cost_calibration,
         dry_run=dry_run,
@@ -334,9 +355,149 @@ _cache: Config | None = None
 
 
 def reset_cache() -> None:
-    """Drop the cached Config. Used by tests."""
+    """Drop the cached Config. Used by tests and after writing the TOML."""
     global _cache
     _cache = None
+
+
+# --- TOML edit-in-place --------------------------------------------------
+#
+# Preserves comments and formatting. Only handles scalar values (string, int,
+# float, bool). Lists / inline tables go through unchanged — for those, point
+# the user at the file directly.
+
+import re as _re
+
+_SECTION_RE = _re.compile(r"^\s*\[([^\]\[]+)\]\s*$")
+_KEY_RE = _re.compile(r"^(\s*)(#\s*)?([A-Za-z_][\w-]*)\s*=\s*(.*?)\s*$")
+
+
+def _fmt_toml(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        # Underscore-separate thousands for readability on big numbers.
+        if abs(v) >= 1000:
+            s = str(abs(v))
+            chunks = []
+            while len(s) > 3:
+                chunks.append(s[-3:])
+                s = s[:-3]
+            chunks.append(s)
+            joined = "_".join(reversed(chunks))
+            return ("-" + joined) if v < 0 else joined
+        return str(v)
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, str):
+        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    raise ValueError(f"unsupported TOML scalar type: {type(v).__name__}")
+
+
+def edit_toml(path: Path, edits: dict[tuple[str | None, str], Any]) -> None:
+    """Edit scalar fields in a TOML file. Preserves comments and formatting.
+
+    edits: mapping of ``(section, key)`` → new value. ``section=None`` means
+    top-level. Value ``None`` comments the line out (no-op if the key wasn't
+    in the file). For keys not present in their section, the line is
+    injected at the END OF THE EXISTING SECTION — never appended as a new
+    duplicate section header (which would be invalid TOML).
+    """
+    if not edits:
+        return
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines(keepends=True)
+
+    # Parse into ordered chunks: each chunk is (section_name|None, [lines]).
+    # The first chunk (section_name=None) holds any top-level lines before
+    # the first [header].
+    chunks: list[tuple[str | None, list[str]]] = [(None, [])]
+    for line in lines:
+        m = _SECTION_RE.match(line)
+        if m:
+            chunks.append((m.group(1).strip(), [line]))
+        else:
+            chunks[-1][1].append(line)
+
+    pending = dict(edits)
+
+    # Pass 1: in-place replace / comment-out for keys that already exist.
+    new_chunks: list[tuple[str | None, list[str]]] = []
+    for sec_name, sec_lines in chunks:
+        new_lines: list[str] = []
+        for line in sec_lines:
+            m_key = _KEY_RE.match(line)
+            if m_key:
+                indent, comment, key, _val_rest = m_key.groups()
+                target = (sec_name, key)
+                if target in pending:
+                    new_v = pending.pop(target)
+                    if new_v is None:
+                        if not comment:
+                            new_lines.append(f"{indent}# {key} = {_val_rest}\n")
+                        else:
+                            new_lines.append(line)
+                    else:
+                        new_lines.append(f"{indent}{key} = {_fmt_toml(new_v)}\n")
+                    continue
+            new_lines.append(line)
+        new_chunks.append((sec_name, new_lines))
+
+    # Pass 2: any remaining edits with a non-None value need to be injected
+    # at the END of their section (or appended as a fresh section if the
+    # section doesn't exist).
+    remaining: dict[str | None, list[tuple[str, Any]]] = {}
+    for (sec, key), v in pending.items():
+        if v is None:
+            continue
+        remaining.setdefault(sec, []).append((key, v))
+
+    if remaining:
+        # Map section_name → chunk index for in-place insertion.
+        sec_index: dict[str | None, int] = {}
+        for i, (sec, _) in enumerate(new_chunks):
+            sec_index.setdefault(sec, i)
+
+        # Inject into existing sections.
+        for sec, kvs in list(remaining.items()):
+            if sec in sec_index:
+                idx = sec_index[sec]
+                _sec, body = new_chunks[idx]
+                # Insert just before the trailing blank lines of the section
+                # so the next section header still gets visual separation.
+                cut = len(body)
+                while cut > 0 and body[cut - 1].strip() == "":
+                    cut -= 1
+                inserts = [f"{k} = {_fmt_toml(v)}\n" for k, v in kvs]
+                new_chunks[idx] = (_sec, body[:cut] + inserts + body[cut:])
+                remaining.pop(sec)
+
+        # Append new sections that didn't exist.
+        for sec, kvs in remaining.items():
+            tail: list[str] = []
+            # Ensure separation from prior content.
+            if new_chunks and new_chunks[-1][1] and not new_chunks[-1][1][-1].endswith("\n"):
+                tail.append("\n")
+            tail.append("\n")
+            if sec is not None:
+                tail.append(f"[{sec}]\n")
+            for k, v in kvs:
+                tail.append(f"{k} = {_fmt_toml(v)}\n")
+            new_chunks.append((sec, tail))
+
+    out: list[str] = []
+    for _, body in new_chunks:
+        out.extend(body)
+
+    # Atomic write.
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(out), encoding="utf-8")
+    tmp.replace(path)
+
+
+def config_path() -> Path:
+    """Path to the active .agents-orchestrator.toml."""
+    return _find_config_file()
 
 
 # --- back-compat module-level accessors -----------------------------------
