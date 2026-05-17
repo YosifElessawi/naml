@@ -564,6 +564,30 @@ def run_status() -> int:
     return 0
 
 
+def _poll_pr_mergeable(pr_number: int, *, tries: int = 6, delay: float = 2.0) -> dict | None:
+    """Re-query a PR's mergeable status until it settles (or we give up).
+
+    GitHub computes mergeability asynchronously; right after a sibling PR
+    merges, this one reports MERGEABLE=UNKNOWN for a few seconds. Polling
+    avoids prematurely skipping a PR that is actually clean.
+    """
+    cfg = config.load()
+    last: dict | None = None
+    for _ in range(tries):
+        try:
+            last = github_ops._gh_json([
+                "pr", "view", str(pr_number),
+                "--repo", cfg.repo,
+                "--json", "number,url,headRefName,mergeable,mergeStateStatus",
+            ]) or None
+        except github_ops.GhError:
+            return None
+        if last and last.get("mergeable") in ("MERGEABLE", "CONFLICTING"):
+            return last
+        time.sleep(delay)
+    return last  # UNKNOWN, but it's the best we have
+
+
 def _latest_session_id_for_issue(issue_number: int) -> str | None:
     """Walk runs.jsonl backwards, return the session_id of the most recent
     record for this issue (so we can resume the agent that originally did
@@ -688,6 +712,14 @@ def run_finish() -> int:
         branch = pr["headRefName"]
         url = pr["url"]
 
+        # GitHub may still be computing mergeability (especially right after
+        # a sibling PR merged). Poll until it settles.
+        if pr.get("mergeable") not in ("MERGEABLE", "CONFLICTING"):
+            _log(f"#{number}: PR state {pr.get('mergeable')} — waiting for GitHub to compute…")
+            refreshed = _poll_pr_mergeable(pr["number"])
+            if refreshed:
+                pr = refreshed
+
         # Plain merge if GitHub says it's clean.
         if pr.get("mergeable") == "MERGEABLE":
             try:
@@ -715,7 +747,8 @@ def run_finish() -> int:
         if ok:
             try:
                 github_ops.push_branch(branch)
-                time.sleep(2)  # let GitHub recompute mergeable status
+                # Wait for GitHub to recompute mergeable status before merging.
+                _poll_pr_mergeable(pr["number"])
                 github_ops.merge_pr(branch)
                 github_ops.comment(
                     number,
@@ -756,19 +789,8 @@ def run_finish() -> int:
             skipped.append((number, "agent rebase failed"))
             continue
 
-        # Re-poll PR state — give GitHub a moment.
-        time.sleep(3)
-        try:
-            refreshed = github_ops._gh_json([
-                "pr", "view", str(pr["number"]),
-                "--repo", cfg.repo,
-                "--json", "mergeable,mergeStateStatus",
-            ]) or {}
-        except github_ops.GhError as exc:
-            _log(f"#{number}: could not refresh PR after agent rebase: {exc}")
-            skipped.append((number, f"PR refresh failed: {exc}"))
-            continue
-
+        # Re-poll PR state — agent's force-push needs a few seconds to settle.
+        refreshed = _poll_pr_mergeable(pr["number"]) or {}
         if refreshed.get("mergeable") != "MERGEABLE":
             _log(f"#{number}: still {refreshed.get('mergeable')} after agent rebase — leaving for manual")
             skipped.append((number, f"agent rebase didn't clear conflicts ({refreshed.get('mergeable')})"))
