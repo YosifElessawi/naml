@@ -100,6 +100,19 @@ grouped into one Claude session. Each issue still gets its own branch and
 its own PR — only the session is shared, for warm cache + context. Cap
 the size in the TOML's `[batch] max_size` (default 4 — keep it small).
 
+### Auto-batching after triage — `/batch-ready`
+
+Triage produces a queue of `ready-for-agent` issues with no batch labels.
+The companion Claude Code skill `/batch-ready` (installed at
+`~/.claude/skills/batch-ready/`) reads the queue, clusters related issues,
+proposes batches, and — after you confirm — applies `batch:<id>` labels
+via `gh`. Run from anywhere inside the target repo:
+
+```
+/batch-ready              # cluster + propose + apply
+/batch-ready --dry-run    # propose only, no labels applied
+```
+
 ## Picking a Claude account
 
 The orchestrator inherits `CLAUDE_CONFIG_DIR` from the shell that runs it.
