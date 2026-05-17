@@ -625,18 +625,57 @@ def run_finish() -> int:
 
 
 def run_calibrate(argv: list[str]) -> int:
-    """Back-solve session/weekly caps from the % reading shown in Claude's
-    own /usage view, then print TOML the user can paste.
+    """Back-solve plan caps and cost-multiplier from real numbers in Claude's
+    own /usage view.
 
     Usage:
         orchestrator.py calibrate <session_pct> [weekly_pct]
+        orchestrator.py calibrate --cost <actual_session_cost_usd>
+
+    The first form back-solves token caps from your "% used" readings.
+    The second form back-solves a cost multiplier from your actual session
+    cost — paste both numbers in if you want, both back-solves print TOML
+    you can copy into `.agents-orchestrator.toml`.
     """
-    if not argv:
+    if not argv or argv[0] in ("-h", "--help"):
         print("usage: orchestrator.py calibrate <session_pct> [weekly_pct]\n"
-              "  Read the % numbers from Claude Code's /usage view, then\n"
-              "  pass them here. Tokens are summed locally, caps are\n"
-              "  back-solved.", file=sys.stderr)
+              "       orchestrator.py calibrate --cost <session_cost_usd>\n\n"
+              "Read the numbers from Claude Code's /usage view, then pass\n"
+              "them here. Tokens and cost are summed locally; the caps and\n"
+              "cost-multiplier are back-solved.", file=sys.stderr)
         return 2
+
+    # --cost mode
+    if argv[0] == "--cost":
+        if len(argv) < 2:
+            print("calibrate --cost requires a USD amount", file=sys.stderr)
+            return 2
+        try:
+            actual_cost = float(argv[1])
+        except ValueError:
+            print(f"calibrate: cost must be a number, got {argv[1]!r}", file=sys.stderr)
+            return 2
+        s = claude_session.session_usage()
+        if not s.ok or s.cost_usd <= 0:
+            print("not enough local data to calibrate cost — no recent transcripts.",
+                  file=sys.stderr)
+            return 2
+        # s.cost_usd is already calibration-adjusted; back out the raw before
+        # solving the new multiplier.
+        raw_cost = s.cost_usd / claude_session._cost_calibration()
+        multiplier = actual_cost / raw_cost if raw_cost > 0 else 1.0
+        print(f"Local transcripts: 5h session = {s.total_tokens:,} tokens")
+        print(f"  raw estimate (Anthropic rates × 1.0): ${raw_cost:.2f}")
+        print(f"  your actual session cost:             ${actual_cost:.2f}")
+        print(f"  implied multiplier:                   ×{multiplier:.3f}")
+        print()
+        print("Paste under [claude] in .agents-orchestrator.toml:")
+        print()
+        print("[claude]")
+        print(f"cost_calibration = {multiplier:.3f}")
+        return 0
+
+    # Percentage / cap mode
     try:
         s_pct = float(argv[0])
         w_pct = float(argv[1]) if len(argv) > 1 else None

@@ -103,6 +103,10 @@ class Config:
     weekly_token_limit: int | None = None
     # Minimum free session-tokens required before a burst-mode run starts.
     burst_min_tokens: int = 100_000
+    # Multiplier applied to the computed (API-retail) cost so users on
+    # Pro/Max subscriptions can dial their cockpit cost numbers to match
+    # what Claude Code itself shows. 1.0 = no adjustment.
+    cost_calibration: float = 1.0
     pro_window_seconds: int = 5 * 60 * 60
 
     # Behaviour
@@ -273,6 +277,20 @@ def load(start: Path | None = None) -> Config:
         int(burst_tbl.get("min_tokens", 100_000)),
     )
 
+    cost_cal_raw = os.environ.get("AO_COST_CALIBRATION", "").strip()
+    if cost_cal_raw:
+        try:
+            cost_calibration = float(cost_cal_raw)
+        except ValueError:
+            raise SystemExit(f"AO_COST_CALIBRATION must be a number, got {cost_cal_raw!r}")
+    else:
+        try:
+            cost_calibration = float(claude_tbl.get("cost_calibration", 1.0))
+        except (TypeError, ValueError):
+            raise SystemExit("[claude] cost_calibration must be a number")
+    if cost_calibration <= 0:
+        cost_calibration = 1.0
+
     logs_tbl = raw.get("logs") or {}
     log_dir_raw = logs_tbl.get("dir")
     log_dir = _expand(log_dir_raw) if log_dir_raw else _default_log_dir(repo)
@@ -304,6 +322,7 @@ def load(start: Path | None = None) -> Config:
         session_token_limit=session_token_limit,
         weekly_token_limit=weekly_token_limit,
         burst_min_tokens=burst_min_tokens,
+        cost_calibration=cost_calibration,
         dry_run=dry_run,
         log_dir=log_dir,
     )

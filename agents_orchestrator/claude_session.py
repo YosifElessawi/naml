@@ -42,16 +42,19 @@ from . import config
 
 # --- pricing --------------------------------------------------------------
 
-# USD per million tokens. Public Anthropic pricing snapshot for the current
-# 4.x family. Pricing can change — override via [claude.prices.<model>] in
-# .agents-orchestrator.toml when it does. Cache-write rates differ by TTL:
-#   default ("5m"): 1.25× input rate
-#   extended ("1h"): 2.00× input rate
-# Cache-read is 0.10× input rate across the board.
+# USD per million tokens. Calibrated against real Claude Code `/usage`
+# numbers (Opus 4.7 sample: 56.3M-token mix charged at $43.34). The Opus
+# rates here are ~1/3 of the legacy Opus 4 rate card, which matches the
+# user-visible cost in Claude Code 2.x. Sonnet/Haiku follow the standard
+# input × {1, 5, 1.25, 2}× / 0.1× pattern.
+#
+# These are approximate; tune via the cost-calibration factor in TOML
+# (``[claude] cost_calibration`` — a multiplier applied to every cost
+# output) if your account shows different numbers.
 _BASE_PRICES: dict[str, dict[str, float]] = {
     "claude-opus-4-7": {
-        "input": 15.0, "output": 75.0,
-        "cache_read": 1.5, "cache_write_5m": 18.75, "cache_write_1h": 30.0,
+        "input": 5.0, "output": 25.0,
+        "cache_read": 0.50, "cache_write_5m": 6.25, "cache_write_1h": 10.0,
     },
     "claude-sonnet-4-6": {
         "input": 3.0, "output": 15.0,
@@ -161,16 +164,25 @@ def _iter_assistant_usage(projects_dir: Path) -> Iterable[tuple[float, str, dict
             continue
 
 
+def _cost_calibration() -> float:
+    """Optional multiplier on the computed cost. Lets the user dial the
+    estimate to match what their Claude Code /usage view shows, without
+    re-deriving every per-model rate."""
+    cfg = config.load()
+    return getattr(cfg, "cost_calibration", 1.0) or 1.0
+
+
 def _cost_for(model: str, *, inp: int, out: int,
               cache_read: int, cw_5m: int, cw_1h: int) -> float:
     p = _price_table(model)
-    return (
+    raw = (
         inp * p["input"]
         + out * p["output"]
         + cache_read * p["cache_read"]
         + cw_5m * p["cache_write_5m"]
         + cw_1h * p["cache_write_1h"]
     ) / 1_000_000.0
+    return raw * _cost_calibration()
 
 
 def _empty_model_row() -> dict:
