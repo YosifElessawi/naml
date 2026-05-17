@@ -83,6 +83,28 @@ max_hours    = 4
 min_headroom = 8
 
 
+[batch]
+# Issues whose labels start with this prefix are grouped into a batched
+# session (warm cache + shared context). Each issue still gets its own
+# branch + its own PR — only the Claude session is shared.
+# Example: an issue labelled `batch:auth-flow` joins the `auth-flow` batch.
+label_prefix = "batch:"
+# Hard cap on issues processed in one batched session. The context window
+# is the real limit — keep batches small.
+max_size = 4
+
+
+[pipeline]
+# Stop after this pipeline stage:
+#   pr     — open the PR, do not merge (the old dry-run behaviour).
+#   review — open the PR + post an auto-review, do not merge.
+#   merge  — full pipeline (default).
+stop_after = "merge"
+# When stop_after = "merge", also run the auto-review BEFORE merging.
+# (When stop_after = "review", auto-review always runs.)
+auto_review = false
+
+
 [claude]
 pro_limit = 45
 bin       = "claude"

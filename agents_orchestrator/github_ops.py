@@ -114,6 +114,52 @@ def list_ready_issues() -> list[dict]:
     return issues
 
 
+def batch_id_of(issue: dict) -> str | None:
+    """Return the batch id of an issue, or None if it has no batch label.
+
+    A batch label looks like ``<prefix><id>`` — e.g. ``batch:auth-flow``.
+    """
+    prefix = config.load().batch_label_prefix
+    for lbl in issue.get("labels") or []:
+        name = lbl.get("name") if isinstance(lbl, dict) else lbl
+        if isinstance(name, str) and name.startswith(prefix):
+            return name[len(prefix):] or None
+    return None
+
+
+def group_into_batches(issues: list[dict]) -> list[tuple[str | None, list[dict]]]:
+    """Group ready issues by batch label, capped at config.batch_max_size.
+
+    Returns a list of (batch_id, [issues]) tuples. batch_id is None for
+    ungrouped (size-1) issues. Order: by oldest issue createdAt across
+    batches; within a batch, by issue number ascending.
+    """
+    cfg = config.load()
+    groups: dict[str | None, list[dict]] = {}
+    seen_solo = 0
+    for issue in issues:
+        bid = batch_id_of(issue)
+        if bid is None:
+            # Each ungrouped issue is its own batch; use a unique sentinel
+            # so they don't collide.
+            key = f"__solo_{seen_solo}"
+            seen_solo += 1
+            groups[key] = [issue]
+        else:
+            groups.setdefault(bid, []).append(issue)
+
+    result: list[tuple[str | None, list[dict]]] = []
+    for key, members in groups.items():
+        members.sort(key=lambda i: i["number"])
+        # Honor the size cap — extra issues fall through to the next pass.
+        capped = members[: cfg.batch_max_size]
+        public_id = None if key.startswith("__solo_") else key
+        result.append((public_id, capped))
+
+    result.sort(key=lambda b: b[1][0]["createdAt"])
+    return result
+
+
 def get_issue(number: int) -> dict:
     return _gh_json([
         "issue", "view", str(number),

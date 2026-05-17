@@ -17,7 +17,7 @@ PLIST      ?= com.agents-orchestrator.$(shell basename "$$PWD").plist
 PLIST_DEST := $(HOME)/Library/LaunchAgents/$(PLIST)
 
 .DEFAULT_GOAL := burst
-.PHONY: burst dry-burst slow dry-slow status ao-install ao-on ao-off ao-status help
+.PHONY: burst dry-burst slow dry-slow status web finish ao-install ao-on ao-off ao-status help
 
 burst: ## Process the whole queue now, supervised (default; merges when green)
 	$(AO) burst
@@ -25,7 +25,7 @@ burst: ## Process the whole queue now, supervised (default; merges when green)
 dry-burst: ## Like burst, but never merges — use during a trial
 	AO_DRY_RUN=1 $(AO) burst
 
-slow: ## Process one issue now, then exit
+slow: ## Process one issue/batch now, then exit
 	$(AO) slow
 
 dry-slow: ## Like slow, but never merges
@@ -33,6 +33,12 @@ dry-slow: ## Like slow, but never merges
 
 status: ## Print the cockpit: queue, running agent, recent runs + session ids
 	$(AO) status
+
+web: ## Start the local web cockpit (http://127.0.0.1:7777)
+	$(AO) serve
+
+finish: ## Merge PRs left open by an earlier stop_after run
+	$(AO) finish
 
 ao-install: ## Copy the launchd plist into ~/Library/LaunchAgents
 	@test -f $(PLIST) || { echo "no $(PLIST) in $$PWD — copy templates/launchd.plist.example and edit"; exit 1; }

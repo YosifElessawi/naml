@@ -174,6 +174,26 @@ _OUTCOME_GLYPH = {
 }
 
 
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}k"
+    return str(n)
+
+
+def _fmt_usage(usage: dict | None) -> str:
+    """Compact one-liner: '12.3k in / 4.5k out / $0.34'."""
+    if not usage:
+        return ""
+    inp = int(usage.get("input_tokens", 0) or 0)
+    out = int(usage.get("output_tokens", 0) or 0)
+    cost = float(usage.get("total_cost_usd", 0.0) or 0.0)
+    if inp == 0 and out == 0 and cost == 0:
+        return ""
+    return f"{_fmt_tokens(inp)} in / {_fmt_tokens(out)} out / ${cost:.2f}"
+
+
 def _section_recent(runs: list[dict]) -> list[str]:
     lines = ["", _bold("Recent runs (last 5)")]
     if not runs:
@@ -186,6 +206,9 @@ def _section_recent(runs: list[dict]) -> list[str]:
         issue = run.get("issue_number", "?")
         detail = run.get("detail", "")
         lines.append(f"  #{issue:<4} {paint(glyph + ' ' + outcome):<20} {dur:>5}   {detail}")
+        usage_line = _fmt_usage(run.get("usage"))
+        if usage_line:
+            lines.append("       " + _dim(usage_line))
         sid = run.get("session_id")
         if sid:
             lines.append("       " + _dim(f"claude --resume {sid}"))

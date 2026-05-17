@@ -70,13 +70,35 @@ From the target repo's root:
 ```bash
 make            # supervised burst — clear the queue now, you watch (default)
 make dry-burst  # same, but never merges — use during a trial
-make slow       # process one issue, then exit
-make status     # the cockpit: queue, running agent, recent runs + session ids
+make slow       # process one issue/batch, then exit
+make status     # the terminal cockpit: queue, running agent, recent runs + session ids
+make web        # the web cockpit: http://127.0.0.1:7777
+make finish     # merge PRs left open by an earlier stop_after run
 make ao-on      # enable the hourly unattended loop (launchd)
 make ao-off     # disable it
 make ao-status  # is the loop loaded?
 make help       # list every target
 ```
+
+## Pipeline stages
+
+The pipeline runs `implement → validate → PR → review → merge`. Pick where
+to stop via `[pipeline] stop_after` in the TOML (or `AO_STOP_AFTER=...`):
+
+- **`merge`** (default) — full pipeline, green PRs auto-merge.
+- **`review`** — stop with PR open + auto-review posted as a PR comment.
+  A human reviews the review, then runs `make finish` to merge.
+- **`pr`** — stop with PR open (this is the old `dry_run` behaviour).
+
+`auto_review = true` (or `AO_AUTO_REVIEW=1`) runs the review BEFORE merge even
+when `stop_after = "merge"` — useful as a safety net.
+
+## Batching
+
+Issues whose labels start with `batch:<id>` (e.g. `batch:auth-flow`) are
+grouped into one Claude session. Each issue still gets its own branch and
+its own PR — only the session is shared, for warm cache + context. Cap
+the size in the TOML's `[batch] max_size` (default 4 — keep it small).
 
 ## Picking a Claude account
 

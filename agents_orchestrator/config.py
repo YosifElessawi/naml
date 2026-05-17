@@ -85,6 +85,14 @@ class Config:
     burst_max_hours: int
     burst_min_headroom: int
 
+    # Batching
+    batch_label_prefix: str         # default "batch:"
+    batch_max_size: int             # default 4
+
+    # Pipeline
+    stop_after: str                 # one of: implement, validate, pr, review, merge
+    auto_review: bool               # run /review before merge when stop_after=merge
+
     # Claude
     claude_config_dir: Path         # for transcript reads only
     claude_bin: str
@@ -212,6 +220,25 @@ def load(start: Path | None = None) -> Config:
     burst_max_hours = _env_int("AO_BURST_MAX_HOURS", int(burst_tbl.get("max_hours", 4)))
     burst_min_headroom = _env_int("AO_BURST_MIN_HEADROOM", int(burst_tbl.get("min_headroom", 8)))
 
+    batch_tbl = raw.get("batch") or {}
+    batch_label_prefix = _env_str("AO_BATCH_PREFIX", batch_tbl.get("label_prefix", "batch:"))
+    batch_max_size = _env_int("AO_BATCH_MAX_SIZE", int(batch_tbl.get("max_size", 4)))
+
+    pipeline_tbl = raw.get("pipeline") or {}
+    stop_after_default = pipeline_tbl.get("stop_after", "merge")
+    stop_after = _env_str("AO_STOP_AFTER", stop_after_default).lower()
+    # The pipeline stops AFTER the named stage completes:
+    #   pr     — PR opened, not merged (the old dry-run behaviour).
+    #   review — PR opened + auto-review posted, not merged.
+    #   merge  — full pipeline (default).
+    valid_stages = {"pr", "review", "merge"}
+    if stop_after not in valid_stages:
+        raise SystemExit(
+            f"stop_after must be one of {sorted(valid_stages)}, got {stop_after!r}"
+        )
+    auto_review_default = bool(pipeline_tbl.get("auto_review", False))
+    auto_review = _env_bool("AO_AUTO_REVIEW") or auto_review_default
+
     claude_tbl = raw.get("claude") or {}
     claude_config_dir = _resolve_claude_config_dir(claude_tbl.get("config_dir"))
     claude_bin = _env_str("AO_CLAUDE_BIN", claude_tbl.get("bin", "claude"))
@@ -223,6 +250,10 @@ def load(start: Path | None = None) -> Config:
     log_dir = Path(_env_str("AO_LOG_DIR", str(log_dir))).expanduser()
 
     dry_run = _env_bool("AO_DRY_RUN")
+    # dry_run is back-compat shorthand for stop_after=pr. If both are set,
+    # the more conservative wins (stop earlier).
+    if dry_run and stop_after == "merge":
+        stop_after = "pr"
 
     cfg = Config(
         repo=repo,
@@ -235,6 +266,10 @@ def load(start: Path | None = None) -> Config:
         burst_max_issues=burst_max_issues,
         burst_max_hours=burst_max_hours,
         burst_min_headroom=burst_min_headroom,
+        batch_label_prefix=batch_label_prefix,
+        batch_max_size=batch_max_size,
+        stop_after=stop_after,
+        auto_review=auto_review,
         claude_config_dir=claude_config_dir,
         claude_bin=claude_bin,
         pro_limit=pro_limit,
@@ -269,6 +304,10 @@ _PROXY_ATTRS = {
     "BURST_MAX_ISSUES": "burst_max_issues",
     "BURST_MAX_HOURS": "burst_max_hours",
     "BURST_MIN_HEADROOM": "burst_min_headroom",
+    "BATCH_LABEL_PREFIX": "batch_label_prefix",
+    "BATCH_MAX_SIZE": "batch_max_size",
+    "STOP_AFTER": "stop_after",
+    "AUTO_REVIEW": "auto_review",
     "CLAUDE_CONFIG_DIR": "claude_config_dir",
     "CLAUDE_BIN": "claude_bin",
     "PRO_LIMIT": "pro_limit",

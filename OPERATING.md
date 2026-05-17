@@ -83,13 +83,59 @@ Run everything from the target repo's root with `make`:
 ```bash
 make            # supervised burst — clear the queue now, you watch (default)
 make dry-burst  # same, but never merges — use during a trial
-make slow       # one issue, then exit
-make status     # the cockpit
+make slow       # one issue/batch, then exit
+make status     # the terminal cockpit
+make web        # the web cockpit — http://127.0.0.1:7777
+make finish     # merge PRs left open by an earlier stop_after run
 make ao-on      # enable the unattended hourly loop (launchd)
 make ao-off     # disable it
 make ao-status  # is the loop loaded?
 make help       # list targets
 ```
+
+## Pipeline stages
+
+```
+implement → validate → PR → review → merge
+```
+
+`stop_after` (TOML `[pipeline] stop_after` or env `AO_STOP_AFTER`) names
+where the pipeline halts. `pr` stops with the PR open. `review` adds an
+auto-review comment and stops. `merge` (default) runs end-to-end.
+
+`auto_review = true` (or `AO_AUTO_REVIEW=1`) runs the review before merge
+even when `stop_after = "merge"`. The review runs in a FRESH Claude session
+(not the implementing agent's), reads the diff via `gh pr diff`, and posts
+a plain-English comment with a `VERDICT: LGTM` or `VERDICT: REQUEST_CHANGES`
+trailer. The verdict is informational today — it does not gate the merge.
+
+Use `make finish` to merge PRs that an earlier `stop_after={pr,review}` run
+left open. It finds issues at `agent-done` with an open PR and merges any
+that are not in conflict.
+
+## Batching
+
+A `batch:<id>` label (default prefix configurable in `[batch] label_prefix`)
+groups multiple issues into one Claude session. Constraints:
+
+- **One branch + one PR per issue.** The session is shared; git output is
+  not. Each issue still gets its own `agent/issue-N-slug` branch and its
+  own PR.
+- **Hard cap on size** (`[batch] max_size`, default 4). The Claude context
+  window is the real limit — batches of 2–4 *related* issues work well.
+- **Bottom-out on first failure.** If the first issue of a batch fails,
+  the rest of the batch is skipped — the shared session is suspect and
+  poisoning subsequent issues is worse than re-queueing them.
+
+If you have **dependent** batched issues (issue B builds on issue A) and
+you want them stacked: that's not the default. The current batch model
+treats issues as co-equal (all branches cut from the same base). Stacked
+PRs require separate work — see roadmap.
+
+⚠️ When stacked PRs eventually land: never delete a base branch with open
+dependent PRs. Either retarget dependents to `master` before delete, or
+merge bottom-up rebasing each branch first. Deleting a base branch closes
+its dependent PRs.
 
 ## The cockpit
 
@@ -244,13 +290,17 @@ Cross-cutting env-var overrides (all optional):
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `CLAUDE_CONFIG_DIR` | unset → `~/.claude` | Claude account dir (inherited by spawned `claude`) |
-| `AO_DRY_RUN` | unset | `1` = do everything except merge |
+| `AO_DRY_RUN` | unset | Shorthand for `AO_STOP_AFTER=pr` |
+| `AO_STOP_AFTER` | `merge` | `pr` / `review` / `merge` |
+| `AO_AUTO_REVIEW` | unset | `1` = run auto-review before merge |
 | `AO_PRO_LIMIT` | 45 | Pro message cap per 5h window |
 | `AO_RUN_CAP_MINUTES` | 30 | Per-run wall-clock cap |
 | `AO_MAX_RETRIES` | 2 | Resume-and-retry attempts on a failed gate |
 | `AO_BURST_MAX_ISSUES` | 5 | Burst-mode issue cap |
 | `AO_BURST_MAX_HOURS` | 4 | Burst-mode wall-clock cap |
 | `AO_BURST_MIN_HEADROOM` | 8 | Min Pro messages free before next burst run |
+| `AO_BATCH_PREFIX` | `batch:` | Issue-label prefix that groups a batch |
+| `AO_BATCH_MAX_SIZE` | 4 | Max issues in one batched session |
 | `AO_REPO_ROOT` | TOML `repo.root` | Override the target repo working copy |
 | `AO_LOG_DIR` | TOML `logs.dir` | Override the log directory |
 | `AO_CLAUDE_BIN` | `claude` | Path to the `claude` binary |
