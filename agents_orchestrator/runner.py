@@ -59,6 +59,30 @@ class RunnerResult(NamedTuple):
     usage: Usage = Usage()  # tokens + cost; zeros when the result wasn't parseable
 
 
+def _claude_env(cfg) -> dict:
+    """Build the env for a spawned ``claude`` subprocess.
+
+    Claude Code's auth keychain entry is keyed by CLAUDE_CONFIG_DIR. When
+    the env var is UNSET, claude uses its built-in default (``~/.claude``)
+    AND looks up the keychain entry stored against that "unset" key. If
+    we explicitly set ``CLAUDE_CONFIG_DIR=/Users/.../.claude`` — same
+    path, but explicit — claude looks up a DIFFERENT keychain entry,
+    which doesn't exist, and reports "Not logged in".
+
+    So: only set the env var when the toml's config_dir is NOT the
+    default. For the default case, drop it so claude finds its
+    default-keyed credentials.
+    """
+    env = os.environ.copy()
+    default_dir = (Path.home() / ".claude").resolve()
+    toml_dir = cfg.claude_config_dir.resolve()
+    if toml_dir == default_dir:
+        env.pop("CLAUDE_CONFIG_DIR", None)
+    else:
+        env["CLAUDE_CONFIG_DIR"] = str(cfg.claude_config_dir)
+    return env
+
+
 def compose_prompt(issue: dict) -> str:
     """Build the first-run prompt from an issue's title and body."""
     cfg = config.load()
@@ -234,11 +258,7 @@ def run_agent(
     cfg = config.load()
     cap_minutes = cfg.run_cap_minutes
 
-    env = os.environ.copy()
-    # If the TOML pins claude.config_dir, pass it through to the spawned
-    # agent so the same account drives both the cockpit's usage view and
-    # the running agent. Otherwise inherit whatever the parent shell has.
-    env["CLAUDE_CONFIG_DIR"] = str(cfg.claude_config_dir)
+    env = _claude_env(cfg)
 
     base_flags = [
         "--output-format", "stream-json", "--verbose",
@@ -348,8 +368,7 @@ def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT") -> tuple
     """
     cfg = config.load()
     cap_minutes = cfg.run_cap_minutes
-    env = os.environ.copy()
-    env["CLAUDE_CONFIG_DIR"] = str(cfg.claude_config_dir)
+    env = _claude_env(cfg)
 
     cmd = [
         cfg.claude_bin, "-p", prompt,

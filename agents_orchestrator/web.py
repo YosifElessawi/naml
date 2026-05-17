@@ -191,6 +191,17 @@ def _build_state() -> dict:
     # transcripts we're summing — last path segment of the config dir.
     claude_account = cfg.claude_config_dir.name or str(cfg.claude_config_dir)
 
+    # Same default-detect as runner._claude_env: if the toml's config_dir
+    # is the default ~/.claude, OMIT the explicit env var from any
+    # paste-able command. Setting it explicitly would surface "Not logged
+    # in" because the keychain entry is keyed against the unset state.
+    default_dir = Path.home() / ".claude"
+    is_default_account = cfg.claude_config_dir.resolve() == default_dir.resolve()
+    resume_env_prefix = (
+        "" if is_default_account
+        else f"CLAUDE_CONFIG_DIR={cfg.claude_config_dir} "
+    )
+
     return {
         "repo": cfg.repo,
         "base_branch": cfg.base_branch,
@@ -199,6 +210,7 @@ def _build_state() -> dict:
         "dry_run": cfg.dry_run,
         "claude_account": claude_account,
         "claude_config_dir": str(cfg.claude_config_dir),
+        "resume_env_prefix": resume_env_prefix,
         "repo_root": str(cfg.repo_root),
         "settings": {
             "pipeline.stop_after": cfg.stop_after,
@@ -312,10 +324,18 @@ class _Handler(BaseHTTPRequestHandler):
 
         # Build the claude command — pin CLAUDE_CONFIG_DIR to the toml's
         # claude.config_dir so the resumed agent uses the SAME account the
-        # orchestrator ran it under (independent of the shell that opens it).
+        # orchestrator ran it under. EXCEPT when the toml value equals the
+        # default ~/.claude — claude's keychain entry for the default
+        # account is keyed against the unset env var, not the explicit
+        # path. Setting the var explicitly there would surface "Not
+        # logged in". Same logic as runner._claude_env.
         cfg = config.load()
-        claude_dir = str(cfg.claude_config_dir)
-        cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(claude_dir)} claude --resume {session_id}"
+        default_dir = Path.home() / ".claude"
+        if cfg.claude_config_dir.resolve() == default_dir.resolve():
+            cmd = f"claude --resume {session_id}"
+        else:
+            claude_dir = str(cfg.claude_config_dir)
+            cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(claude_dir)} claude --resume {session_id}"
         cwd = str(cfg.repo_root)
 
         try:
@@ -937,12 +957,14 @@ async function openAgent(sid, btn) {
 window.openAgent = openAgent;
 
 async function copyResume(sid, btn) {
-  // Mirror the same env-pinned command the server uses, so paste-and-go works.
+  // Mirror the server-side _claude_env logic via the resume_env_prefix
+  // the server pre-computes (empty when using the default ~/.claude
+  // account, since adding an explicit env var would break the keychain
+  // lookup).
   try {
     const state = window.__lastState || {};
-    const dir = state.claude_config_dir || '';
+    const prefix = state.resume_env_prefix || '';
     const repo = state.repo_root || '';
-    const prefix = dir ? `CLAUDE_CONFIG_DIR='${dir}' ` : '';
     const cdPart = repo ? `cd '${repo}' && ` : '';
     const cmd = `${cdPart}${prefix}claude --resume ${sid}`;
     await navigator.clipboard.writeText(cmd);
