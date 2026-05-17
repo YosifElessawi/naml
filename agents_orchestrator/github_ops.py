@@ -211,9 +211,53 @@ def comment(number: int, body: str) -> None:
 
 # --- gh: pull requests ----------------------------------------------------
 
+def find_open_pr(branch: str) -> dict | None:
+    """Return the open PR's metadata for ``branch``, or None.
+
+    Used to detect a PR left behind by a prior failed/retried run on the
+    same branch — we want to reuse it (update title/body, lift draft)
+    instead of trying to open a duplicate.
+    """
+    out = _run(["gh", "pr", "list",
+                "--repo", config.load().repo,
+                "--state", "open",
+                "--head", branch,
+                "--json", "number,url,isDraft,title",
+                "--limit", "1"])
+    if not out.strip():
+        return None
+    data = json.loads(out)
+    return data[0] if data else None
+
+
 def create_pr(branch: str, title: str, body: str, *, draft: bool = False) -> str:
-    """Open a PR for ``branch`` against the base branch. Returns its URL."""
+    """Open (or update) the PR for ``branch`` against the base branch.
+
+    If an open PR already exists for the branch (e.g., a draft left by a
+    prior failed run that this retry overwrote), reuse it: update the
+    title/body to reflect the new run, and lift the draft flag if the
+    current run is green. Returns the PR URL.
+    """
     cfg = config.load()
+    existing = find_open_pr(branch)
+    if existing:
+        pr_num = str(existing["number"])
+        try:
+            _run(["gh", "pr", "edit", pr_num,
+                  "--repo", cfg.repo,
+                  "--title", title,
+                  "--body", body])
+        except GhError:
+            # Editing is best-effort. If it fails the PR URL is still
+            # usable; the user can see the run record's detail.
+            pass
+        if existing.get("isDraft") and not draft:
+            try:
+                _run(["gh", "pr", "ready", pr_num, "--repo", cfg.repo])
+            except GhError:
+                pass
+        return existing.get("url", "")
+
     cmd = [
         "gh", "pr", "create",
         "--repo", cfg.repo,
