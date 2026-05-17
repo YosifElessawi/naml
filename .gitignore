@@ -8,3 +8,6 @@ __pycache__/
 
 # Local-only overrides
 .agents-orchestrator.local.toml
+
+# Nested playground repo — its own git history lives at GitHub.
+/mock-target/

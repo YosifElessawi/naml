@@ -375,20 +375,23 @@ def _path_str(v):
 
 # (section, key) → coercer
 def _iso_dt(v):
-    """Accept a datetime-local string (`YYYY-MM-DDTHH:MM`) OR full ISO and
-    store it as ISO with timezone. We don't trust an HTML datetime-local
-    field to carry tz info, so we anchor it to the server's local zone."""
+    """Accept a datetime-local string (`YYYY-MM-DDTHH:MM`) OR a tz-aware ISO
+    string. Store it as a NAIVE local-time ISO string (no offset). The form
+    sends local time, the reader (`_parse_reset_iso`) interprets naive
+    values as local — this avoids any TZ drift between client and server.
+    """
     s = str(v).strip()
     if not s:
         raise ValueError("empty datetime")
     try:
         from datetime import datetime as _dt
-        # If TZ included, parse directly.
         s2 = s.replace("Z", "+00:00")
         dt = _dt.fromisoformat(s2)
-        if dt.tzinfo is None:
-            dt = dt.astimezone()
-        return dt.isoformat()
+        # If tz-aware: convert into the server's local TZ, then strip the
+        # offset for clean naive storage. If already naive: store as-is.
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return dt.isoformat(timespec="seconds")
     except ValueError:
         raise ValueError("must be ISO 8601 (e.g. 2026-05-17T09:50:00)")
 
