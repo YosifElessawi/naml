@@ -125,12 +125,18 @@ def _build_state() -> dict:
         for bid, items in queue_by_batch.items()
     ]
 
+    # Pull a short, human-recognizable label for the Claude account whose
+    # transcripts we're summing — last path segment of the config dir.
+    claude_account = cfg.claude_config_dir.name or str(cfg.claude_config_dir)
+
     return {
         "repo": cfg.repo,
         "base_branch": cfg.base_branch,
         "stop_after": cfg.stop_after,
         "auto_review": cfg.auto_review,
         "dry_run": cfg.dry_run,
+        "claude_account": claude_account,
+        "claude_config_dir": str(cfg.claude_config_dir),
         "now": datetime.now(timezone.utc).isoformat(),
         "current": current,
         "current_cap_minutes": cfg.run_cap_minutes,
@@ -153,28 +159,40 @@ def _build_state() -> dict:
 
 class _Handler(BaseHTTPRequestHandler):
 
+    def _send_bytes(self, body: bytes, content_type: str, status: int = 200) -> None:
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Browser closed the connection mid-response (refresh, tab close,
+            # polling overlap). Normal; not worth a stack trace.
+            pass
+
     def _send_json(self, payload: Any, status: int = 200) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        self._send_bytes(
+            json.dumps(payload).encode("utf-8"),
+            "application/json; charset=utf-8",
+            status,
+        )
 
     def _send_html(self, body: str, status: int = 200) -> None:
-        data = body.encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_bytes(body.encode("utf-8"), "text/html; charset=utf-8", status)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 — stdlib signature
         # Quieter logs — only show errors.
         if args and isinstance(args[0], str) and args[0].startswith(("4", "5")):
             sys.stderr.write("[ao-web] " + (format % args) + "\n")
+
+    def handle_one_request(self) -> None:
+        # Suppress the noisy traceback when a client hangs up mid-request.
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
 
     def do_GET(self) -> None:  # noqa: N802 — stdlib signature
         if self.path == "/" or self.path.startswith("/?"):
@@ -182,9 +200,11 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/state":
             try:
-                self._send_json(_build_state())
+                payload = _build_state()
             except Exception as exc:  # last-ditch — surface to UI
                 self._send_json({"error": str(exc)}, status=500)
+                return
+            self._send_json(payload)
             return
         self._send_json({"error": "not found"}, status=404)
 
@@ -720,6 +740,7 @@ async function refresh() {
     if (state.error) throw new Error(state.error);
     $('#repo').textContent = state.repo + '  →  ' + state.base_branch;
     const flags = [];
+    if (state.claude_account) flags.push('account: ' + state.claude_account);
     if (state.stop_after !== 'merge') flags.push('stop_after=' + state.stop_after);
     if (state.auto_review) flags.push('auto_review');
     if (state.dry_run) flags.push('dry_run');
