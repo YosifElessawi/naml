@@ -739,12 +739,14 @@ async function refresh() {
     const state = await r.json();
     if (state.error) throw new Error(state.error);
     $('#repo').textContent = state.repo + '  →  ' + state.base_branch;
+    // Show the active config knobs unconditionally — easier to spot a
+    // surprising setting than to remember which ones are "interesting".
     const flags = [];
     if (state.claude_account) flags.push('account: ' + state.claude_account);
-    if (state.stop_after !== 'merge') flags.push('stop_after=' + state.stop_after);
-    if (state.auto_review) flags.push('auto_review');
+    flags.push('stop_after=' + (state.stop_after || 'merge'));
+    flags.push('auto_review=' + (state.auto_review ? 'on' : 'off'));
     if (state.dry_run) flags.push('dry_run');
-    $('#meta').textContent = flags.length ? flags.join(' · ') : '';
+    $('#meta').textContent = flags.join(' · ');
     $('#now').innerHTML = renderNow(state);
     $('#usage').innerHTML = renderUsage(state);
     $('#cost').innerHTML = renderCost(state);
