@@ -791,7 +791,7 @@ _INDEX_HTML = r"""<!doctype html>
 
     /* === Bar chart === */
     .chart {
-      display: flex; align-items: flex-end;
+      display: flex; align-items: stretch;  /* stretch so .bar-col fills height */
       gap: 3px;
       height: 100px;
       padding: 8px 0 0;
@@ -802,6 +802,7 @@ _INDEX_HTML = r"""<!doctype html>
       flex: 1;
       min-width: 5px;
       max-width: 22px;
+      height: 100%;          /* explicit height so .bar-fill % heights resolve */
       display: flex; flex-direction: column;
       justify-content: flex-end;
       cursor: pointer;
