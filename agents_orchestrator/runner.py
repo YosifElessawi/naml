@@ -59,6 +59,29 @@ class RunnerResult(NamedTuple):
     usage: Usage = Usage()  # tokens + cost; zeros when the result wasn't parseable
 
 
+# Per-session allow list, granted to every spawned agent. Broad enough to
+# cover everything a coding agent needs across recent claude versions;
+# narrow enough that we're not just shrugging at the permission system.
+_ALLOWED_TOOLS = (
+    # File ops
+    "Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
+    # Shell — any command. The user's settings.json may still apply `deny`
+    # rules (e.g., `rm -rf *`), which is the safety net we want.
+    "Bash(*)",
+    # Search
+    "Glob", "Grep",
+    # Web — with wildcard so any URL is fine.
+    "WebFetch", "WebFetch(*)", "WebSearch",
+    # Workflow + subagents
+    "Task", "TodoWrite",
+    "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TaskOutput", "TaskStop",
+    "Skill", "ToolSearch",
+    "AskUserQuestion",
+    "ExitPlanMode", "EnterPlanMode",
+    "EnterWorktree", "ExitWorktree",
+)
+
+
 def _claude_env(cfg) -> dict:
     """Build the env for a spawned ``claude`` subprocess.
 
@@ -269,12 +292,12 @@ def run_agent(
         "--dangerously-skip-permissions",
         # Per-session ALLOW override. Even in bypassPermissions mode,
         # the user's settings.json `permissions.allow` allowlist still
-        # gates Bash invocations. If the user has narrow patterns like
-        # `Bash(git status*)` configured, anything not matching gets
-        # denied — including `git commit`, which a coding agent
-        # absolutely needs. Granting `Bash(*)` for this spawned session
-        # only is the right scope; user's global settings stay untouched.
-        "--allowedTools", "Bash(*) Edit Write Read MultiEdit NotebookEdit Glob Grep WebFetch WebSearch Task TodoWrite ExitPlanMode",
+        # gates calls — bypass mode skips the interactive prompt, but
+        # rule-based denials still apply. So narrow patterns like
+        # `Bash(git status*)` in the user's config block `git commit`
+        # even when bypass is on. Grant broadly for this spawned session
+        # only; user's global settings stay untouched.
+        "--allowedTools", " ".join(_ALLOWED_TOOLS),
     ]
     if resume:
         cmd = [cfg.claude_bin, "--resume", session_id, "-p", prompt, *base_flags]
@@ -383,9 +406,10 @@ def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT") -> tuple
         "--output-format", "stream-json", "--verbose",
         "--permission-mode", "bypassPermissions",
         "--dangerously-skip-permissions",
-        # Review subagent does not run Bash, but pass the same allowlist
-        # for consistency / future-proofing if reviewers ever shell out.
-        "--allowedTools", "Bash(*) Read Glob Grep",
+        # Review subagent — narrower than the implementing agent's grant
+        # because reviewers shouldn't be editing files or running broad
+        # shell commands. Just enough to inspect and report.
+        "--allowedTools", "Read Glob Grep Bash(gh pr diff*) Bash(git diff*) Bash(git log*) WebFetch WebSearch",
     ]
 
     deadline = time.time() + cap_minutes * 60
