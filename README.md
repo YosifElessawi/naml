@@ -1,31 +1,40 @@
-# agents-orchestrator
+# Naml — نمل
 
-A personal dev tool. Picks up triaged GitHub issues, drives a Claude session
-against each, runs local validation gates, opens a PR, and merges when
-everything is green. Project-agnostic — configure once per target repo.
+> A colony of Claude Code agents that picks up triaged GitHub issues, drives a
+> session against each, validates locally, and ships PRs while you sleep.
 
-Python 3.11+, stdlib only. No CI minutes — every gate runs on your machine.
+**Naml** (نمل, Arabic for *ants*) is a personal-scale orchestrator for
+[Claude Code](https://claude.com/claude-code). Like ants on a queue, it
+fans many small agents across your backlog — each one owns one issue, opens
+one PR, and only merges when every local gate is green.
+
+Python 3.11+, stdlib only. **Zero GitHub Actions minutes** — every gate runs
+on your machine.
+
+---
 
 ## How it fits
 
-This tool owns the **implementation phase** of a spec-driven workflow:
+Naml owns the **implementation phase** of a spec-driven workflow:
 
 ```
-grilling → PRD → to-issues → triage  ⇒  agents-orchestrator  ⇒  merged PRs
+grilling → PRD → to-issues → triage  ⇒  Naml  ⇒  merged PRs
 ```
 
 Issue authoring + triage happens elsewhere (Matt Pocock's skills, for
-example). This tool picks up whatever those produce — issues labelled
+example). Naml picks up whatever those produce — issues labelled
 `ready-for-agent` — and drives them to merged PRs.
 
 ## Setup
 
-### One-time (per machine)
+### Clone it
 
 ```bash
-# Already done if you're reading this from ~/Desktop/Claudey/.
-ls ~/Desktop/Claudey   # confirm the tool is here
+git clone https://github.com/YosifElessawi/naml.git ~/Desktop/Claudey
 ```
+
+(Any path works; the templates default to `~/Desktop/Claudey` but you can
+point `AO_HOME` at wherever you cloned it.)
 
 ### Per target repo
 
@@ -40,7 +49,7 @@ cp ~/Desktop/Claudey/templates/.agents-orchestrator.toml.example .agents-orchest
 Then edit `.agents-orchestrator.toml`:
 
 - Set `repo.slug = "owner/your-repo"`
-- Set `repo.base_branch` (e.g. `master` / `main`)
+- Set `repo.base_branch` (e.g. `main` / `master`)
 - Replace the `[[gates]]` blocks with whatever commands validate this repo
   (pnpm, uv, cargo, make — anything that exits non-zero on failure)
 
@@ -49,14 +58,14 @@ Optional — drop the issue template and launchd plist if you want them:
 ```bash
 mkdir -p .github/ISSUE_TEMPLATE
 cp ~/Desktop/Claudey/templates/issue-template.yml .github/ISSUE_TEMPLATE/agent-task.yml
-cp ~/Desktop/Claudey/templates/launchd.plist.example com.agents-orchestrator.your-repo.plist
+cp ~/Desktop/Claudey/templates/launchd.plist.example com.naml.your-repo.plist
 # edit the plist's TODO placeholders
 ```
 
 ### Bootstrap the label state machine (one-time per repo)
 
 ```bash
-gh label create ready-for-agent --color "0E8A16" --description "Orchestrator will pick this up"
+gh label create ready-for-agent --color "0E8A16" --description "Naml will pick this up"
 gh label create agent-running   --color "FBCA04" --description "Currently being worked on by an agent"
 gh label create agent-done      --color "5319E7" --description "Agent finished, PR opened/merged"
 gh label create agent-failed    --color "B60205" --description "Agent run failed validation"
@@ -88,10 +97,10 @@ to stop via `[pipeline] stop_after` in the TOML (or `AO_STOP_AFTER=...`):
 - **`merge`** (default) — full pipeline, green PRs auto-merge.
 - **`review`** — stop with PR open + auto-review posted as a PR comment.
   A human reviews the review, then runs `make finish` to merge.
-- **`pr`** — stop with PR open (this is the old `dry_run` behaviour).
+- **`pr`** — stop with PR open (the old `dry_run` behaviour).
 
-`auto_review = true` (or `AO_AUTO_REVIEW=1`) runs the review BEFORE merge even
-when `stop_after = "merge"` — useful as a safety net.
+`auto_review = true` (or `AO_AUTO_REVIEW=1`) runs the review BEFORE merge
+even when `stop_after = "merge"` — useful as a safety net.
 
 ## Batching
 
@@ -115,7 +124,7 @@ via `gh`. Run from anywhere inside the target repo:
 
 ## Picking a Claude account
 
-The orchestrator inherits `CLAUDE_CONFIG_DIR` from the shell that runs it.
+Naml inherits `CLAUDE_CONFIG_DIR` from the shell that runs it.
 
 - **Default** (unset) → `claude` uses its own default: `~/.claude`.
 - **Personal** (or any aliased account) → `export CLAUDE_CONFIG_DIR=~/.claude-personal`
@@ -138,9 +147,33 @@ Per run, in `~/Library/Logs/agents-orchestrator/<slug>/`:
 `make status` prints a `claude --resume <uuid>` line for every run — paste
 it to peek inside an agent or take it over by hand.
 
+## About the name
+
+**Naml** (نمل) is Arabic for *ants*. The metaphor: many small agents
+working in coordinated parallel on a shared queue — each one carrying a
+crumb (an issue) back to the colony (the merged main branch). Short to
+type, distinctive, and the swarm imagery captures what the tool does.
+
+> **Note:** The Python package directory is still named `agents_orchestrator/`,
+> and the per-project config file is still `.agents-orchestrator.toml` — the
+> internal rename will land in a follow-up to avoid breaking existing
+> installs. The CLI surface (`make ...`) stays compatible across the rename.
+
+## Status
+
+Naml is a **personal developer tool** I built for my own workflow and am
+releasing as open source so friends and curious people can use it or
+hack on it. The roadmap (see [`roadmap.md`](./roadmap.md)) reflects what
+I personally need next — not a product backlog. Issues and PRs welcome,
+but expect slow response times and opinionated reviews.
+
 ## Further reading
 
 - [`OPERATING.md`](./OPERATING.md) — operating guide: label state machine,
   failure recovery, Pro-window caveats.
 - [`roadmap.md`](./roadmap.md) — forward plan (batching, pipeline stages,
   web UI, etc.).
+
+## License
+
+MIT — see [`LICENSE`](./LICENSE).
