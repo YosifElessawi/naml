@@ -28,7 +28,20 @@ needs_info = "needs-info"
 # Local validation gates. Order matters — cheapest / most-likely-to-fail first.
 # The first gate to fail stops the chain and triggers the resume-based retry.
 #
+# IMPORTANT — PATH gotcha: gates are spawned by the orchestrator, NOT by an
+# interactive shell. They DO NOT inherit anything from your `.venv` or
+# `nvm` activation. If a gate needs a tool in a per-project virtualenv,
+# reference its absolute path (e.g. `.venv/bin/ruff`) OR install it
+# globally / use a wrapper like `uv run` / `pnpm exec`. Otherwise the gate
+# will fail with "tool not on PATH".
+#
 # Examples:
+#   Python venv (most common pitfall):
+#     [[gates]]
+#     name = "lint"
+#     argv = [".venv/bin/ruff", "check", "."]      # ✓ absolute path
+#     # argv = ["ruff", "check", "."]              # ✗ will fail if not global
+#
 #   JS / pnpm:
 #     [[gates]]
 #     name = "install"
@@ -38,7 +51,7 @@ needs_info = "needs-info"
 #     name = "lint"
 #     argv = ["pnpm", "lint"]
 #
-#   Python / uv:
+#   Python / uv (uv itself must be on PATH globally):
 #     [[gates]]
 #     name = "lint"
 #     argv = ["uv", "run", "ruff", "check", "."]

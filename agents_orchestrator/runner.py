@@ -235,10 +235,19 @@ def run_agent(
     cap_minutes = cfg.run_cap_minutes
 
     env = os.environ.copy()
-    # Deliberately do NOT override CLAUDE_CONFIG_DIR — inherit from parent.
+    # If the TOML pins claude.config_dir, pass it through to the spawned
+    # agent so the same account drives both the cockpit's usage view and
+    # the running agent. Otherwise inherit whatever the parent shell has.
+    env["CLAUDE_CONFIG_DIR"] = str(cfg.claude_config_dir)
 
-    base_flags = ["--output-format", "stream-json", "--verbose",
-                  "--dangerously-skip-permissions"]
+    base_flags = [
+        "--output-format", "stream-json", "--verbose",
+        # Explicit bypass mode — `--dangerously-skip-permissions` only
+        # enables the option in some builds; `--permission-mode
+        # bypassPermissions` sets the actual mode the agent runs in.
+        "--permission-mode", "bypassPermissions",
+        "--dangerously-skip-permissions",
+    ]
     if resume:
         cmd = [cfg.claude_bin, "--resume", session_id, "-p", prompt, *base_flags]
     else:
@@ -340,10 +349,12 @@ def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT") -> tuple
     cfg = config.load()
     cap_minutes = cfg.run_cap_minutes
     env = os.environ.copy()
+    env["CLAUDE_CONFIG_DIR"] = str(cfg.claude_config_dir)
 
     cmd = [
         cfg.claude_bin, "-p", prompt,
         "--output-format", "stream-json", "--verbose",
+        "--permission-mode", "bypassPermissions",
         "--dangerously-skip-permissions",
     ]
 

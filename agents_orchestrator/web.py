@@ -15,15 +15,77 @@ Bind defaults to 127.0.0.1.
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import shutil
 import subprocess
 import sys
 import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from . import claude_session, config, github_ops
+
+
+class _LaunchError(RuntimeError):
+    pass
+
+
+def _open_in_terminal(cwd: str, cmd: str) -> None:
+    """Spawn a new terminal window in ``cwd`` running ``cmd``.
+
+    Auto-detects:
+      1. cmux  — if its binary is on PATH, use `cmux new-workspace --cwd … --command …`
+      2. macOS Terminal — fall back to osascript
+
+    Override via the env var ``AO_TERMINAL_CMD`` (a shell command with
+    ``{cwd}`` and ``{cmd}`` placeholders), e.g.::
+
+        export AO_TERMINAL_CMD='wezterm cli spawn --cwd {cwd} -- bash -c "{cmd}"'
+    """
+    template = os.environ.get("AO_TERMINAL_CMD", "").strip()
+    if template:
+        rendered = template.replace("{cwd}", cwd).replace("{cmd}", cmd)
+        try:
+            subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            raise _LaunchError(f"AO_TERMINAL_CMD failed: {exc.stderr.strip() or exc}")
+        return
+
+    cmux = shutil.which("cmux")
+    if cmux:
+        # cmux opens a new workspace running the command directly — no
+        # shell wrapper needed. Command must include the env-var prefix
+        # itself (we already format it that way).
+        try:
+            subprocess.run(
+                [cmux, "new-workspace", "--cwd", cwd, "--command", cmd],
+                check=True, capture_output=True, text=True,
+            )
+            return
+        except subprocess.CalledProcessError as exc:
+            # Fall through to Terminal if cmux is broken.
+            sys.stderr.write(f"[ao-web] cmux launch failed, falling back: {exc.stderr.strip()}\n")
+
+    # macOS Terminal fallback via osascript. Build a shell command that
+    # cds first so the resumed agent sees the repo as cwd.
+    full = f"cd {shlex.quote(cwd)} && {cmd}"
+    # Escape backslashes and double-quotes for the AppleScript string literal.
+    esc = full.replace("\\", "\\\\").replace('"', '\\"')
+    applescript = (
+        f'tell application "Terminal" to do script "{esc}"\n'
+        'tell application "Terminal" to activate'
+    )
+    try:
+        subprocess.run(
+            ["osascript", "-e", applescript],
+            check=True, capture_output=True, text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise _LaunchError(f"failed to open Terminal: {exc.stderr.strip() or exc}")
 
 
 # --- state assembly -------------------------------------------------------
@@ -137,6 +199,7 @@ def _build_state() -> dict:
         "dry_run": cfg.dry_run,
         "claude_account": claude_account,
         "claude_config_dir": str(cfg.claude_config_dir),
+        "repo_root": str(cfg.repo_root),
         "settings": {
             "pipeline.stop_after": cfg.stop_after,
             "pipeline.auto_review": cfg.auto_review,
@@ -224,6 +287,9 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/api/config":
             self._handle_config_post()
             return
+        if self.path == "/api/open_log":
+            self._handle_open_log()
+            return
         if self.path != "/api/open":
             self._send_json({"error": "not found"}, status=404)
             return
@@ -244,27 +310,50 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "session_id must be a UUID-like token"}, status=400)
             return
 
-        # Build the claude command, honoring CLAUDE_CONFIG_DIR if set in the
-        # orchestrator's env (so the Terminal inherits the same account).
-        import os
-        cfg_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-        prefix = f"CLAUDE_CONFIG_DIR={cfg_dir} " if cfg_dir else ""
-        cmd = f"{prefix}claude --resume {session_id}"
+        # Build the claude command — pin CLAUDE_CONFIG_DIR to the toml's
+        # claude.config_dir so the resumed agent uses the SAME account the
+        # orchestrator ran it under (independent of the shell that opens it).
+        cfg = config.load()
+        claude_dir = str(cfg.claude_config_dir)
+        cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(claude_dir)} claude --resume {session_id}"
+        cwd = str(cfg.repo_root)
 
-        # macOS: open a new Terminal window running the command.
-        # Use osascript so we don't depend on Terminal's CLI shape.
-        applescript = (
-            'tell application "Terminal" to do script '
-            f'"{cmd.replace(chr(34), chr(92) + chr(34))}"\n'
-            'tell application "Terminal" to activate'
-        )
         try:
-            subprocess.run(
-                ["osascript", "-e", applescript],
-                check=True, capture_output=True, text=True,
-            )
+            _open_in_terminal(cwd, cmd)
+        except _LaunchError as exc:
+            self._send_json({"error": str(exc)}, status=500)
+            return
+        self._send_json({"ok": True, "cmd": cmd, "cwd": cwd})
+
+    def _handle_open_log(self) -> None:
+        """Open a run log file via `open` (macOS default app)."""
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+        try:
+            payload = json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            self._send_json({"error": "invalid JSON"}, status=400)
+            return
+        path = str(payload.get("path", "") or "")
+        if not path:
+            self._send_json({"error": "path required"}, status=400)
+            return
+        # Constrain to the log dir to prevent open-anything abuse.
+        cfg = config.load()
+        target = Path(path).expanduser().resolve()
+        log_root = cfg.log_dir.resolve()
+        try:
+            target.relative_to(log_root)
+        except ValueError:
+            self._send_json({"error": "path outside log dir"}, status=400)
+            return
+        if not target.exists():
+            self._send_json({"error": "log file not found"}, status=404)
+            return
+        try:
+            subprocess.run(["open", str(target)], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as exc:
-            self._send_json({"error": f"failed to open Terminal: {exc.stderr.strip()}"}, status=500)
+            self._send_json({"error": f"open failed: {exc.stderr.strip()}"}, status=500)
             return
         self._send_json({"ok": True})
 
@@ -542,6 +631,38 @@ _INDEX_HTML = r"""<!doctype html>
       border: 1px solid var(--border); border-radius: 4px;
       font: inherit; font-size: 11px;
     }
+    /* Calibrate panel inside the Usage section */
+    .calib-wrap { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+    button.link {
+      background: transparent; border: none; color: var(--accent);
+      font-size: 11px; padding: 0; cursor: pointer;
+    }
+    button.link:hover { text-decoration: underline; }
+    .calib-body { margin-top: 8px; padding: 10px 12px;
+      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .calib-grid {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+    }
+    .calib-grid label {
+      display: block; font-size: 11px; color: var(--muted);
+    }
+    .calib-grid input {
+      display: block; margin-top: 3px; width: 100%;
+      padding: 4px 6px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 4px;
+      font: inherit; font-size: 12px;
+    }
+    .calib-actions {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 10px;
+    }
+    .calib-actions button {
+      padding: 4px 10px; font-size: 11px;
+    }
     /* Settings form */
     .section h2 .hint {
       text-transform: none; letter-spacing: 0;
@@ -714,33 +835,11 @@ _INDEX_HTML = r"""<!doctype html>
             <input class="custom-path" type="text" name="claude.config_dir" placeholder="/abs/path or ~/.claude-foo" style="display:none">
           </fieldset>
 
-          <fieldset>
-            <legend>Plan caps</legend>
-            <label class="block">
-              <span>Session tokens (5h)</span>
-              <input type="number" name="claude.session_token_limit" min="0" step="1000000">
-            </label>
-            <label class="block">
-              <span>Weekly tokens (7d)</span>
-              <input type="number" name="claude.weekly_token_limit" min="0" step="10000000">
-            </label>
-          </fieldset>
+          <!-- Plan caps + reset anchors moved out of the everyday form;
+               surfaced via the "Calibrate from /usage" panel inside the
+               Usage section. The cockpit works without them — the bars
+               just go to raw-tokens mode. -->
 
-          <fieldset>
-            <legend>Reset anchors</legend>
-            <div class="small dim" style="margin-bottom:6px">
-              Read off Claude's <code>/usage</code> (e.g. "Resets 9:50am"). Set once;
-              auto-rolls forward.
-            </div>
-            <label class="block">
-              <span>Next session reset</span>
-              <input type="datetime-local" name="claude.session_reset_at">
-            </label>
-            <label class="block">
-              <span>Next weekly reset</span>
-              <input type="datetime-local" name="claude.weekly_reset_at">
-            </label>
-          </fieldset>
 
           <fieldset>
             <legend>Cost</legend>
@@ -819,21 +918,66 @@ function escape(s) {
   }[c]));
 }
 
-async function openAgent(sid) {
+async function openAgent(sid, btn) {
   try {
     const r = await fetch('/api/open', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sid }),
     });
+    const body = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const err = await r.json().catch(() => ({ error: 'unknown' }));
-      alert('Could not open agent: ' + (err.error || r.status));
+      alert('Could not open agent: ' + (body.error || r.status));
+      return;
     }
+    flashOK(btn, 'Opened');
   } catch (e) {
     alert('Could not open agent: ' + e.message);
   }
 }
 window.openAgent = openAgent;
+
+async function copyResume(sid, btn) {
+  // Mirror the same env-pinned command the server uses, so paste-and-go works.
+  try {
+    const state = window.__lastState || {};
+    const dir = state.claude_config_dir || '';
+    const repo = state.repo_root || '';
+    const prefix = dir ? `CLAUDE_CONFIG_DIR='${dir}' ` : '';
+    const cdPart = repo ? `cd '${repo}' && ` : '';
+    const cmd = `${cdPart}${prefix}claude --resume ${sid}`;
+    await navigator.clipboard.writeText(cmd);
+    flashOK(btn, 'Copied');
+  } catch (e) {
+    alert('Clipboard write failed: ' + e.message);
+  }
+}
+window.copyResume = copyResume;
+
+async function openLog(path, btn) {
+  try {
+    const r = await fetch('/api/open_log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      alert('Could not open log: ' + (body.error || r.status));
+      return;
+    }
+    flashOK(btn, 'Opened');
+  } catch (e) {
+    alert('Could not open log: ' + e.message);
+  }
+}
+window.openLog = openLog;
+
+function flashOK(btn, msg) {
+  if (!btn) return;
+  const original = btn.textContent;
+  btn.textContent = msg;
+  btn.disabled = true;
+  setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1100);
+}
 
 function renderNow(state) {
   const c = state.current;
@@ -856,7 +1000,9 @@ function renderNow(state) {
     <div style="margin-top:8px">${bar(pct, klass)}</div>
     <div class="session-row">
       <span class="mono small truncate">claude --resume ${escape(c.session_id || '')}</span>
-      <button onclick="openAgent('${escape(c.session_id || '')}')">Open agent</button>
+      <button onclick="openAgent('${escape(c.session_id || '')}', this)">Open agent</button>
+      <button onclick="copyResume('${escape(c.session_id || '')}', this)">Copy</button>
+      ${c.log_path ? `<button onclick="openLog('${escape(c.log_path)}', this)">View log</button>` : ''}
     </div>
   `;
 }
@@ -905,27 +1051,103 @@ function renderUsage(state) {
   let out = '';
   out += usageRow('Session (5h rolling)', u.session);
   out += usageRow('Weekly (7d rolling)', u.weekly);
-  if (!u.limits_configured) {
-    const sessTok = u.session && u.session.ok ? u.session.total_tokens : 0;
-    const weekTok = u.weekly && u.weekly.ok ? u.weekly.total_tokens : 0;
-    out += `
-      <div class="config-hint">
-        Plan caps unconfigured. Calibrate from Claude's own
-        <code>/usage</code> view: type the % numbers it shows, get a
-        TOML snippet to paste.
-        <div class="calib">
-          <label>Session: <input id="calib-s" type="number" min="0" max="100" step="0.1" placeholder="e.g. 85"/>%</label>
-          <label>Weekly: <input id="calib-w" type="number" min="0" max="100" step="0.1" placeholder="e.g. 23"/>%</label>
-          <button onclick="calibrate(${sessTok}, ${weekTok})">Compute caps</button>
+
+  // Calibration panel — collapsed by default. Only opens when the user
+  // explicitly wants to sync caps + reset anchors from Claude's /usage.
+  const sessTok = u.session && u.session.ok ? u.session.total_tokens : 0;
+  const weekTok = u.weekly && u.weekly.ok ? u.weekly.total_tokens : 0;
+  const haveLimits = u.limits_configured;
+  out += `
+    <div class="calib-wrap">
+      <button class="link" onclick="toggleCalib(this)" type="button">
+        ${haveLimits ? '⚙ Recalibrate from /usage' : '⚙ Calibrate from /usage'}
+      </button>
+      <div class="calib-body" style="display:none">
+        <div class="small dim" style="margin-bottom:6px">
+          Open Claude Code → Settings → Usage. Read the % numbers and
+          the next reset times, paste them here. Both the cap and the
+          reset anchor get saved — one-time per account.
         </div>
-        <pre id="calib-out" style="display:none;margin:8px 0 0;padding:8px;
-              background:var(--panel-2);border-radius:4px;
-              color:var(--text);font-size:11px;"></pre>
+        <div class="calib-grid">
+          <label>Session %
+            <input id="calib-s" type="number" min="0" max="100" step="0.1" placeholder="e.g. 85"/>
+          </label>
+          <label>Weekly %
+            <input id="calib-w" type="number" min="0" max="100" step="0.1" placeholder="e.g. 23"/>
+          </label>
+          <label>Session reset
+            <input id="calib-sr" type="datetime-local"/>
+          </label>
+          <label>Weekly reset
+            <input id="calib-wr" type="datetime-local"/>
+          </label>
+        </div>
+        <div class="calib-actions">
+          <button onclick="applyCalibration(${sessTok}, ${weekTok}, this)" type="button">Save</button>
+          <span id="calib-status" class="small dim"></span>
+        </div>
       </div>
-    `;
-  }
+    </div>
+  `;
   return out;
 }
+
+function toggleCalib(btn) {
+  const body = btn.nextElementSibling;
+  body.style.display = body.style.display === 'none' ? '' : 'none';
+}
+window.toggleCalib = toggleCalib;
+
+async function applyCalibration(sessTok, weekTok, btn) {
+  const sPct = parseFloat(document.getElementById('calib-s').value);
+  const wPct = parseFloat(document.getElementById('calib-w').value);
+  const sReset = document.getElementById('calib-sr').value;
+  const wReset = document.getElementById('calib-wr').value;
+  const status = document.getElementById('calib-status');
+
+  function backSolve(used, pct) {
+    if (!used || !pct || pct <= 0 || pct > 100) return null;
+    return Math.ceil((used / (pct / 100)) / 1_000_000) * 1_000_000;
+  }
+
+  const payload = {};
+  const sCap = backSolve(sessTok, sPct);
+  const wCap = backSolve(weekTok, wPct);
+  if (sCap) payload['claude.session_token_limit'] = sCap;
+  if (wCap) payload['claude.weekly_token_limit'] = wCap;
+  if (sReset) payload['claude.session_reset_at'] = sReset;
+  if (wReset) payload['claude.weekly_reset_at'] = wReset;
+
+  if (Object.keys(payload).length === 0) {
+    status.textContent = 'fill in at least one value';
+    status.style.color = 'var(--yellow)';
+    return;
+  }
+
+  status.textContent = 'saving…';
+  status.style.color = 'var(--muted)';
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      status.textContent = 'error: ' + (body.error || r.status);
+      status.style.color = 'var(--red)';
+      return;
+    }
+    status.textContent = `saved ${body.changed} field${body.changed === 1 ? '' : 's'}`;
+    status.style.color = 'var(--green)';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+    refresh();
+  } catch (e) {
+    status.textContent = 'error: ' + e.message;
+    status.style.color = 'var(--red)';
+  }
+}
+window.applyCalibration = applyCalibration;
 
 function calibrate(sessTok, weekTok) {
   const s = parseFloat(document.getElementById('calib-s').value);
@@ -1158,7 +1380,9 @@ function renderRuns(state) {
         ${r.session_id ? `
         <div class="session-row">
           <span class="mono small truncate">claude --resume ${escape(r.session_id)}</span>
-          <button onclick="openAgent('${escape(r.session_id)}')">Open agent</button>
+          <button onclick="openAgent('${escape(r.session_id)}', this)">Open agent</button>
+          <button onclick="copyResume('${escape(r.session_id)}', this)">Copy</button>
+          ${r.log_path ? `<button onclick="openLog('${escape(r.log_path)}', this)">View log</button>` : ''}
         </div>` : ''}
       </div>
     `;
@@ -1172,6 +1396,7 @@ async function refresh() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const state = await r.json();
     if (state.error) throw new Error(state.error);
+    window.__lastState = state;
     $('#repo').textContent = state.repo + '  →  ' + state.base_branch;
     // Show the active config knobs unconditionally — easier to spot a
     // surprising setting than to remember which ones are "interesting".
