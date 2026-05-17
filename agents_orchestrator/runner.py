@@ -267,6 +267,14 @@ def run_agent(
         # bypassPermissions` sets the actual mode the agent runs in.
         "--permission-mode", "bypassPermissions",
         "--dangerously-skip-permissions",
+        # Per-session ALLOW override. Even in bypassPermissions mode,
+        # the user's settings.json `permissions.allow` allowlist still
+        # gates Bash invocations. If the user has narrow patterns like
+        # `Bash(git status*)` configured, anything not matching gets
+        # denied — including `git commit`, which a coding agent
+        # absolutely needs. Granting `Bash(*)` for this spawned session
+        # only is the right scope; user's global settings stay untouched.
+        "--allowedTools", "Bash(*) Edit Write Read MultiEdit NotebookEdit Glob Grep WebFetch WebSearch Task TodoWrite ExitPlanMode",
     ]
     if resume:
         cmd = [cfg.claude_bin, "--resume", session_id, "-p", prompt, *base_flags]
@@ -375,6 +383,9 @@ def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT") -> tuple
         "--output-format", "stream-json", "--verbose",
         "--permission-mode", "bypassPermissions",
         "--dangerously-skip-permissions",
+        # Review subagent does not run Bash, but pass the same allowlist
+        # for consistency / future-proofing if reviewers ever shell out.
+        "--allowedTools", "Bash(*) Read Glob Grep",
     ]
 
     deadline = time.time() + cap_minutes * 60

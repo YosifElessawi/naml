@@ -54,13 +54,21 @@ def fetch_base() -> None:
 
 
 def create_branch(name: str) -> None:
-    """Create ``name`` from origin/<base> and check it out.
+    """Create ``name`` from origin/<base> and check it out CLEAN.
 
-    Any in-progress work on the current branch is left untouched — the
-    orchestrator owns the working copy while it runs.
+    The orchestrator owns the working tree during a run. We force-reset
+    to origin/<base> before cutting the new branch so any staged or
+    unstaged leftovers from a prior interrupted run don't bleed into the
+    new agent's view of the repo (which would make it think the work
+    was already done).
     """
+    cfg = config.load()
     fetch_base()
-    git("checkout", "-B", name, f"origin/{config.load().base_branch}")
+    # Reset HEAD + working tree to origin/<base>. Drops any uncommitted
+    # changes — by design, since the prior agent's work is either on a
+    # pushed branch already or was abandoned.
+    git("reset", "--hard", f"origin/{cfg.base_branch}")
+    git("checkout", "-B", name)
 
 
 def push_branch(name: str) -> None:
