@@ -1518,14 +1518,24 @@ function flashOK(btn, msg) {
 }
 
 // ===========================================================================
-// Settings modal
+// Settings modal — dirty-tracking edition
+//
+// Only fields the user actually touches are sent on Save. Without this, a
+// Save click before state loaded (or with state pre-populated but untouched)
+// would push the form's *current display* — including HTML default values
+// — back to the server, silently downgrading any real toml settings.
+//
+// Two safety nets:
+//   1. data-dirty attribute set via input/change events; save reads only
+//      dirty fields.
+//   2. Save button disabled until /api/state has populated __lastState.
 // ===========================================================================
-let _settingsDirty = false;
 
 function openSettings() {
   syncSettingsForm(window.__lastState || {});
   document.getElementById('modal').classList.add('open');
-  _settingsDirty = false;
+  resetDirty();
+  updateSaveEnabled();
 }
 function closeSettings() {
   document.getElementById('modal').classList.remove('open');
@@ -1534,6 +1544,26 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeSettings();
 });
 window.openSettings = openSettings; window.closeSettings = closeSettings;
+
+function _allFormFields() {
+  return document.querySelectorAll('#settings-form [name]');
+}
+function resetDirty() {
+  _allFormFields().forEach(el => el.removeAttribute('data-dirty'));
+  const status = document.getElementById('settings-status');
+  if (status) { status.textContent = ''; status.style.color = ''; }
+}
+function markDirty(el) {
+  if (el && el.name) el.setAttribute('data-dirty', '1');
+}
+function updateSaveEnabled() {
+  const ready = window.__lastState && window.__lastState.settings;
+  const btn = document.querySelector('.modal-foot button.primary');
+  if (btn) {
+    btn.disabled = !ready;
+    btn.title = ready ? '' : 'Waiting for state to load…';
+  }
+}
 
 function onAcctChange(sel) {
   const custom = document.querySelector('.custom-path');
@@ -1544,6 +1574,9 @@ function onAcctChange(sel) {
     custom.style.display = 'none';
     custom.value = sel.value;
   }
+  // Programmatic .value changes don't fire input/change events, so mark
+  // the destination field dirty explicitly when the preset moves it.
+  markDirty(custom);
 }
 window.onAcctChange = onAcctChange;
 
@@ -1568,28 +1601,56 @@ function syncSettingsForm(state) {
   } else {
     preset.value = '__custom__'; custom.style.display = ''; custom.value = dir;
   }
+  // Re-wire dirty listeners once per form lifetime.
+  if (!f._dirtyWired) {
+    f.addEventListener('input',  e => markDirty(e.target));
+    f.addEventListener('change', e => markDirty(e.target));
+    f._dirtyWired = true;
+  }
 }
 
 async function saveSettings(ev) {
   ev.preventDefault();
   const f = document.getElementById('settings-form');
   const status = document.getElementById('settings-status');
-  const data = new FormData(f);
-  const payload = {};
-
-  const stop = data.get('pipeline.stop_after');
-  if (stop) payload['pipeline.stop_after'] = stop;
-  payload['pipeline.auto_review'] = f.querySelector('[name="pipeline.auto_review"]').checked;
-
-  const dir = (data.get('claude.config_dir') || '').trim();
-  if (dir) payload['claude.config_dir'] = dir;
-
-  for (const key of ['claude.cost_calibration', 'run.cap_minutes', 'run.max_retries']) {
-    const raw = data.get(key);
-    payload[key] = raw === '' || raw == null ? null : Number(raw);
+  if (!window.__lastState || !window.__lastState.settings) {
+    status.textContent = 'state not loaded yet — try again in a sec';
+    status.style.color = 'var(--yellow)';
+    return false;
   }
 
-  status.textContent = 'saving…'; status.style.color = '';
+  // Collect only dirty fields. claude.config_dir_preset is a UI affordance,
+  // not a real toml key — strip it; the real value is in claude.config_dir.
+  const payload = {};
+  for (const el of _allFormFields()) {
+    if (!el.hasAttribute('data-dirty')) continue;
+    if (el.name === 'claude.config_dir_preset') continue;
+    let val;
+    if (el.type === 'checkbox') {
+      val = el.checked;
+    } else if (el.type === 'number') {
+      const raw = el.value;
+      val = raw === '' ? null : Number(raw);
+    } else if (el.type === 'datetime-local') {
+      const raw = (el.value || '').trim();
+      val = raw === '' ? null : raw;
+    } else {
+      const raw = (el.value || '').trim();
+      val = raw === '' ? null : raw;
+    }
+    payload[el.name] = val;
+  }
+
+  if (Object.keys(payload).length === 0) {
+    status.textContent = 'no changes';
+    status.style.color = 'var(--muted)';
+    setTimeout(() => { closeSettings(); status.textContent = ''; }, 500);
+    return false;
+  }
+
+  status.textContent = 'saving ' + Object.keys(payload).length + ' field' +
+                      (Object.keys(payload).length === 1 ? '' : 's') + '…';
+  status.style.color = '';
   try {
     const r = await fetch('/api/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1603,7 +1664,8 @@ async function saveSettings(ev) {
     }
     status.textContent = `saved ${body.changed} field${body.changed === 1 ? '' : 's'}`;
     status.style.color = 'var(--green)';
-    setTimeout(() => { closeSettings(); status.textContent = ''; }, 800);
+    resetDirty();
+    setTimeout(() => { closeSettings(); status.textContent = ''; }, 700);
     refresh();
   } catch (e) {
     status.textContent = 'error: ' + e.message;
@@ -1639,6 +1701,12 @@ async function refresh() {
     renderChart(state);
     $('#queue').innerHTML = renderQueue(state);
     $('#runs').innerHTML = renderRuns(state);
+
+    // If the modal is open and was rendered before state arrived, the
+    // Save button is disabled — re-enable now that state is in.
+    if (document.getElementById('modal').classList.contains('open')) {
+      updateSaveEnabled();
+    }
 
     lastError = null;
   } catch (e) {
