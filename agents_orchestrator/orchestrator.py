@@ -19,7 +19,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -52,11 +54,114 @@ def _run_id(issue_number: int) -> str:
     return f"{stamp}-issue{issue_number}"
 
 
+# Multiple lane threads append to runs.jsonl concurrently; serialise the
+# writes so records don't interleave mid-line.
+_RUNS_LOCK = threading.Lock()
+
+
 def _append_run_record(record: dict) -> None:
     cfg = config.load()
     cfg.ensure_log_dir()
-    with cfg.runs_jsonl.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record) + "\n")
+    with _RUNS_LOCK:
+        with cfg.runs_jsonl.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record) + "\n")
+
+
+# Orchestrator-owned live-run document. The runner used to write/clear this
+# around each claude subprocess, which made the UI flicker (and lose the run
+# entirely between agent-exit and the final runs.jsonl append). Now it stays
+# alive for the whole pipeline; the `stage` field tracks where we are.
+#
+# With parallel lanes, each lane writes its own file (current.lane{N}.json)
+# so writes don't conflict and the web layer can render N concurrent cards.
+# Single-lane runs continue to write current.lane1.json — the web layer
+# globs and returns all of them.
+PIPELINE_STAGES = ("setup", "agent", "gates", "push", "pr", "review", "merge")
+FINISH_STAGES = ("finish-check", "finish-rebase", "finish-push", "finish-merge")
+
+
+def _write_current(record: dict, stage: str, *, attempt: int = 0,
+                   lane: int = 1) -> None:
+    cfg = config.load()
+    cfg.ensure_log_dir()
+    payload = {
+        "run_id": record["run_id"],
+        "issue_number": record["issue_number"],
+        "issue_title": record["issue_title"],
+        "session_id": record["session_id"],
+        "started_at": record["started_at"],
+        "log_path": record.get("log_path"),
+        "batch_id": record.get("batch_id"),
+        "mode": record["mode"],
+        "cap_minutes": cfg.run_cap_minutes,
+        "dry_run": cfg.dry_run,
+        "stage": stage,
+        "stage_started_at": _now_iso(),
+        "attempt": attempt,
+        "lane": lane,
+    }
+    path = cfg.lane_current_json(lane)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _clear_current(lane: int = 1) -> None:
+    cfg = config.load()
+    cfg.lane_current_json(lane).unlink(missing_ok=True)
+    # Also remove the legacy single-lane file if it still exists from a
+    # pre-parallel-lanes run. Harmless no-op once migrated.
+    cfg.current_json.unlink(missing_ok=True)
+
+
+# --- worktree management for parallel lanes ------------------------------
+
+# Serialise worktree creation. Concurrent `git worktree add` calls race on
+# the shared .git/index.lock — one wins, the other fails with a confusing
+# "fatal: Unable to create '.../index.lock'" and the lane silently exits.
+# Holding this lock costs us a sub-second once per lane on first dispatch.
+_WORKTREE_LOCK = threading.Lock()
+
+
+def _ensure_lane_worktree(lane: int) -> Path:
+    """Create (or reuse) a git worktree for ``lane``. Returns its path.
+
+    Worktrees live OUTSIDE the user's repo so a stray `git status` in the
+    main checkout never picks them up. `.venv` is symlinked in so gates
+    that use `.venv/bin/ruff` (etc.) resolve correctly.
+
+    Thread-safe: the global ``_WORKTREE_LOCK`` ensures only one thread
+    runs ``git worktree add`` at a time. Without it, concurrent lane
+    threads race on git's index.lock and one of them fails.
+    """
+    cfg = config.load()
+    wt = cfg.lane_worktree(lane)
+    # Fast path — already created. Cheap and lock-free.
+    if wt.exists() and (wt / ".git").exists():
+        return wt
+    with _WORKTREE_LOCK:
+        # Re-check inside the lock — another thread may have created it
+        # for THIS lane while we were waiting (shouldn't happen in
+        # practice since each lane creates its own, but cheap to verify).
+        if wt.exists() and (wt / ".git").exists():
+            return wt
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        if wt.exists():
+            # Stale dir (no .git inside) — clean before creating the worktree.
+            shutil.rmtree(wt, ignore_errors=True)
+        # Fresh worktree from the latest origin/<base_branch>. --detach so
+        # it doesn't claim the base branch as its own checkout.
+        github_ops.git("fetch", "origin", cfg.base_branch)
+        github_ops.git("worktree", "add", "--detach", str(wt), f"origin/{cfg.base_branch}")
+        # Symlink .venv so per-gate commands like `.venv/bin/pytest` resolve.
+        venv = cfg.repo_root / ".venv"
+        target = wt / ".venv"
+        if venv.exists() and not target.exists():
+            try:
+                os.symlink(venv, target)
+            except OSError as exc:
+                _log(f"lane {lane}: could not symlink .venv — gates may fail: {exc}")
+        return wt
 
 
 def _log(msg: str) -> None:
@@ -82,6 +187,8 @@ def _process_issue(
     batch_id: str | None = None,
     batch_position: tuple[int, int] | None = None,
     prior_issues: list[dict] | None = None,
+    lane: int = 1,
+    cwd: Path | None = None,
 ) -> tuple[str, str | None]:
     """Run the full pick -> agent -> validate -> PR -> review -> merge flow
     for one already-fetched issue.
@@ -117,6 +224,7 @@ def _process_issue(
         "log_path": str(log_path),
         "batch_id": batch_id,
         "batch_position": list(batch_position) if batch_position else None,
+        "lane": lane,
     }
 
     usage_acc = {
@@ -150,10 +258,17 @@ def _process_issue(
             pr_url=pr_url,
         )
         _append_run_record(record)
+        # Note: we intentionally do NOT clear the lane state here. The
+        # next issue's `_write_current("setup")` will overwrite this file
+        # within a fraction of a second, so the UI sees a seamless
+        # transition from one issue's stage bar to the next. Clearing
+        # happens only when the LANE itself is done (in `_lane_worker`)
+        # or when the burst driver exits.
         _log(f"issue #{number}: {outcome} — {detail}")
         return outcome, session_id
 
     # 1. Move to running and cut the branch.
+    _write_current(record, "setup", lane=lane)
     try:
         github_ops.set_agent_label(number, cfg.labels.running)
         github_ops.create_branch(branch)
@@ -172,11 +287,13 @@ def _process_issue(
     else:
         prompt = runner.compose_prompt(issue)
 
+    _write_current(record, "agent", lane=lane)
     result = runner.run_agent(
         prompt, session_id, run_id, log_path, issue, mode,
         name=None if is_continuation else agent_name,
         resume=is_continuation,
         batch_id=batch_id,
+        cwd=cwd,
     )
     _add_usage(result)
     if result.timed_out:
@@ -189,15 +306,18 @@ def _process_issue(
         return finish("failed", f"agent exited {result.exit_code}", failed_gate="agent")
 
     # 3. Gates with resume-based auto-retry.
-    validation = validator.run_gates(log_path)
+    _write_current(record, "gates", lane=lane)
+    validation = validator.run_gates(log_path, cwd=cwd)
     attempt = 0
     while not validation.passed and attempt < cfg.max_retries:
         attempt += 1
         _log(f"gate '{validation.failed_gate}' failed — retry {attempt}/{cfg.max_retries} "
              f"(resuming session {session_id})")
+        _write_current(record, "agent", attempt=attempt, lane=lane)
         retry = runner.run_agent(
             runner.compose_retry_prompt(validation.failed_gate, validation.tail),
             session_id, run_id, log_path, issue, mode, resume=True, batch_id=batch_id,
+            cwd=cwd,
         )
         _add_usage(retry)
         if retry.timed_out or not retry.completed or retry.exit_code != 0:
@@ -205,7 +325,8 @@ def _process_issue(
                                   f"Agent failed during retry {attempt} "
                                   f"(timed_out={retry.timed_out}, exit={retry.exit_code}).")
             return finish("failed", f"retry {attempt} failed", failed_gate=validation.failed_gate)
-        validation = validator.run_gates(log_path)
+        _write_current(record, "gates", attempt=attempt, lane=lane)
+        validation = validator.run_gates(log_path, cwd=cwd)
 
     if not validation.passed:
         _leave_for_inspection(number, branch, log_path, session_id,
@@ -231,7 +352,9 @@ def _process_issue(
     # 5. Push + PR.
     retried = f" (after {attempt} retr{'y' if attempt == 1 else 'ies'})" if attempt else ""
     try:
+        _write_current(record, "push", attempt=attempt, lane=lane)
         github_ops.push_branch(branch)
+        _write_current(record, "pr", attempt=attempt, lane=lane)
         pr_url = github_ops.create_pr(
             branch, _pr_title(branch, title), _pr_body(number, run_id, session_id, conflict, batch_id))
         github_ops.set_agent_label(number, cfg.labels.done)
@@ -255,7 +378,8 @@ def _process_issue(
     # 7. Optional auto-review.
     review_outcome: str | None = None
     if cfg.stop_after == "review" or cfg.auto_review:
-        review_outcome = _run_auto_review(issue, pr_url, log_path, usage_acc)
+        _write_current(record, "review", attempt=attempt, lane=lane)
+        review_outcome = _run_auto_review(issue, pr_url, log_path, usage_acc, cwd=cwd)
 
     if cfg.stop_after == "review":
         verdict = review_outcome or "(no verdict)"
@@ -266,6 +390,7 @@ def _process_issue(
                       f"PR opened + reviewed (stop_after=review): {pr_url}", pr_url=pr_url)
 
     # 8. Merge.
+    _write_current(record, "merge", attempt=attempt, lane=lane)
     try:
         github_ops.merge_pr(branch)
     except github_ops.GhError as exc:
@@ -276,7 +401,8 @@ def _process_issue(
     return finish("done", f"merged PR: {pr_url}", pr_url=pr_url)
 
 
-def _run_auto_review(issue: dict, pr_url: str, log_path: Path, usage_acc: dict) -> str | None:
+def _run_auto_review(issue: dict, pr_url: str, log_path: Path, usage_acc: dict,
+                     *, cwd: Path | None = None) -> str | None:
     """Spawn a fresh Claude session to review the PR. Posts a comment on the PR
     with the review text. Returns the verdict (``LGTM`` / ``REQUEST_CHANGES`` /
     ``None`` if it couldn't be parsed).
@@ -300,7 +426,7 @@ def _run_auto_review(issue: dict, pr_url: str, log_path: Path, usage_acc: dict) 
         diff = diff[:MAX_DIFF_CHARS] + "\n\n[…diff truncated for review…]"
 
     prompt = runner.compose_review_prompt(issue, pr_url, diff)
-    review_result, text = runner.run_oneshot(prompt, log_path, label="REVIEW")
+    review_result, text = runner.run_oneshot(prompt, log_path, label="REVIEW", cwd=cwd)
 
     # Add review's usage to the run's total.
     u = review_result.usage
@@ -329,7 +455,8 @@ def _run_auto_review(issue: dict, pr_url: str, log_path: Path, usage_acc: dict) 
 
 # --- batch driver ---------------------------------------------------------
 
-def process_one_batch(batch_id: str | None, issues: list[dict], mode: str) -> list[str]:
+def process_one_batch(batch_id: str | None, issues: list[dict], mode: str,
+                      *, lane: int = 1, cwd: Path | None = None) -> list[str]:
     """Process every issue in a batch under a single shared session.
 
     Returns a list of outcome strings, one per issue. The first issue starts
@@ -353,10 +480,11 @@ def process_one_batch(batch_id: str | None, issues: list[dict], mode: str) -> li
             continue
 
         title = issue.get("title", "").strip()
+        prefix = f"lane{lane} · " if lane > 1 else ""
         if batch_id:
-            _log(f"batch:{batch_id} — issue {index}/{total}: #{issue['number']} {title}")
+            _log(f"{prefix}batch:{batch_id} — issue {index}/{total}: #{issue['number']} {title}")
         else:
-            _log(f"picked issue #{issue['number']}: {title}")
+            _log(f"{prefix}picked issue #{issue['number']}: {title}")
 
         outcome, used_session = _process_issue(
             issue, mode,
@@ -364,6 +492,8 @@ def process_one_batch(batch_id: str | None, issues: list[dict], mode: str) -> li
             batch_id=batch_id,
             batch_position=(index, total) if total > 1 else None,
             prior_issues=list(prior_issues),
+            lane=lane,
+            cwd=cwd,
         )
         outcomes.append(outcome)
         if session_id is None:
@@ -510,6 +640,66 @@ def _next_batch() -> tuple[str | None, list[dict]] | None:
     return batches[0] if batches else None
 
 
+def _next_n_batches(n: int) -> list[tuple[str | None, list[dict]]]:
+    """Return up to ``n`` independent batches from the queue.
+
+    Independence rule: different ``batch:*`` labels are independent.
+    Issues without a batch label become their own one-item batch. Two
+    batches with the same id are NOT independent (they're the same batch
+    and must share a lane sequentially).
+    """
+    cfg = config.load()
+    try:
+        queue = github_ops.list_ready_issues()
+    except github_ops.GhError as exc:
+        _log(f"could not read issue queue: {exc}")
+        return []
+    if not queue:
+        return []
+    batches = github_ops.group_into_batches(queue)
+    return batches[:n]
+
+
+def _lane_worker(
+    lane: int,
+    pop_next: "callable",
+    record_run: "callable",
+    mode: str,
+) -> None:
+    """Continuous lane worker — pulls the next batch from the shared
+    work queue and processes it, looping until the queue dispenser returns
+    None (queue empty or caps hit).
+
+    The thread-local cwd in ``github_ops`` is set ONCE per worker, so every
+    git/gh call in this thread routes into the lane's worktree.
+    """
+    try:
+        wt = _ensure_lane_worktree(lane)
+    except (github_ops.GitError, github_ops.GhError, OSError) as exc:
+        _log(f"lane {lane}: could not set up worktree: {exc}")
+        return
+
+    _log(f"lane {lane}: worker started · worktree {wt}")
+    with github_ops.in_dir(str(wt)):
+        while True:
+            work = pop_next(lane)
+            if work is None:
+                _log(f"lane {lane}: no more work — exiting")
+                _clear_current(lane=lane)
+                return
+            batch_id, issues = work
+            label = f"batch:{batch_id}" if batch_id else f"issue #{issues[0]['number']}"
+            _log(f"lane {lane}: picked up {label} ({len(issues)} issue{'s' if len(issues) != 1 else ''})")
+            try:
+                outcomes = process_one_batch(batch_id, issues, mode, lane=lane, cwd=wt)
+            except Exception as exc:  # noqa: BLE001 — last-ditch
+                _log(f"lane {lane}: unexpected error: {exc}")
+                outcomes = [f"failed-{type(exc).__name__}"]
+            ran = sum(1 for o in outcomes
+                      if not o.startswith("skipped") and not o.startswith("failed-setup"))
+            record_run(lane, batch_id, outcomes, ran)
+
+
 def run_slow() -> int:
     cfg = config.load()
     _log(f"slow mode — processing at most one batch (stop_after={cfg.stop_after}).")
@@ -524,36 +714,152 @@ def run_slow() -> int:
     batch_id, issues = batch
     if batch_id:
         _log(f"batch:{batch_id} has {len(issues)} issue(s)")
-    process_one_batch(batch_id, issues, "slow")
+    # Always use lane 1's worktree — even single-lane runs MUST stay out of
+    # the user's main checkout, because `create_branch` does
+    # `git reset --hard origin/<base>` which would wipe any uncommitted
+    # local edits (notably .agents-orchestrator.toml).
+    try:
+        wt = _ensure_lane_worktree(1)
+    except (github_ops.GitError, github_ops.GhError, OSError) as exc:
+        _log(f"could not set up worktree: {exc}")
+        return 1
+    with github_ops.in_dir(str(wt)):
+        process_one_batch(batch_id, issues, "slow", lane=1, cwd=wt)
+    _clear_current(lane=1)
     return 0
 
 
 def run_burst() -> int:
     cfg = config.load()
-    _log(f"burst mode — clearing the queue within safety caps (stop_after={cfg.stop_after}).")
+    lanes = cfg.parallel_lanes
+    if lanes <= 1:
+        return _run_burst_serial()
+    return _run_burst_parallel(lanes)
+
+
+def _run_burst_serial() -> int:
+    cfg = config.load()
+    _log(f"burst mode (serial) — clearing the queue within safety caps "
+         f"(stop_after={cfg.stop_after}).")
     deadline = time.time() + cfg.burst_max_hours * 3600
     processed = 0
-    while True:
-        if processed >= cfg.burst_max_issues:
-            _log(f"burst stop: hit max issues ({cfg.burst_max_issues}).")
-            break
-        if time.time() >= deadline:
-            _log(f"burst stop: hit wall-clock cap ({cfg.burst_max_hours}h).")
-            break
-        if not _headroom_ok("burst"):
-            _log("burst stop: " + _headroom_msg())
-            break
 
-        batch = _next_batch()
-        if batch is None:
-            _log("burst stop: queue empty.")
-            break
-        batch_id, issues = batch
-        if batch_id:
-            _log(f"batch:{batch_id} has {len(issues)} issue(s)")
-        outcomes = process_one_batch(batch_id, issues, "burst")
-        # Count issues that actually ran (not skipped).
-        processed += sum(1 for o in outcomes if o != "skipped")
+    # Single-lane bursts still use a worktree so the main repo stays
+    # untouched (see run_slow comment).
+    try:
+        wt = _ensure_lane_worktree(1)
+    except (github_ops.GitError, github_ops.GhError, OSError) as exc:
+        _log(f"could not set up worktree: {exc}")
+        return 1
+
+    with github_ops.in_dir(str(wt)):
+        while True:
+            if processed >= cfg.burst_max_issues:
+                _log(f"burst stop: hit max issues ({cfg.burst_max_issues}).")
+                break
+            if time.time() >= deadline:
+                _log(f"burst stop: hit wall-clock cap ({cfg.burst_max_hours}h).")
+                break
+            if not _headroom_ok("burst"):
+                _log("burst stop: " + _headroom_msg())
+                break
+
+            batch = _next_batch()
+            if batch is None:
+                _log("burst stop: queue empty.")
+                break
+            batch_id, issues = batch
+            if batch_id:
+                _log(f"batch:{batch_id} has {len(issues)} issue(s)")
+            outcomes = process_one_batch(batch_id, issues, "burst", lane=1, cwd=wt)
+            # Count issues that actually ran (not skipped).
+            processed += sum(1 for o in outcomes if o != "skipped")
+
+    _clear_current(lane=1)
+    _log(f"burst finished — {processed} issue(s) processed.")
+    return 0
+
+
+def _run_burst_parallel(lanes: int) -> int:
+    """Continuous-lane parallel burst.
+
+    Each lane is a long-running worker that pulls the next available batch
+    from a SHARED work queue the moment it finishes its current batch. The
+    queue is re-fetched from GitHub whenever it empties, so labels applied
+    mid-burst get picked up. Lanes only exit when:
+      - the queue is empty, OR
+      - the burst-wide caps (max_issues / max_hours / headroom) trip.
+
+    This replaces the prior wave-and-join model, which left one lane idle
+    while waiting for the slower sibling — visible to the user as the
+    "Now Running" panel flickering down to one card.
+    """
+    cfg = config.load()
+    _log(f"burst mode (parallel · {lanes} lanes, continuous) — clearing the "
+         f"queue within safety caps (stop_after={cfg.stop_after}).")
+    deadline = time.time() + cfg.burst_max_hours * 3600
+
+    # Shared mutable state — guarded by a single lock. Kept tight; lanes
+    # only hold the lock while popping/refilling, not during the actual
+    # _process_issue work.
+    state_lock = threading.Lock()
+    pending: list[tuple[str | None, list[dict]]] = []
+    processed = 0
+    queue_known_empty = False
+
+    def refill_locked() -> None:
+        """Re-fetch the queue when ``pending`` is empty. Caller holds the lock."""
+        nonlocal queue_known_empty
+        if pending:
+            return
+        try:
+            queue = github_ops.list_ready_issues()
+        except github_ops.GhError as exc:
+            _log(f"refill: could not read queue: {exc}")
+            queue_known_empty = True
+            return
+        if not queue:
+            queue_known_empty = True
+            return
+        pending.extend(github_ops.group_into_batches(queue))
+
+    def pop_next(lane: int) -> tuple[str | None, list[dict]] | None:
+        """Pop the next batch for ``lane``, or None when work is exhausted."""
+        nonlocal processed, queue_known_empty
+        with state_lock:
+            if processed >= cfg.burst_max_issues:
+                if not getattr(pop_next, "_logged_cap", False):
+                    _log(f"burst stop: hit max issues ({cfg.burst_max_issues}).")
+                    pop_next._logged_cap = True   # type: ignore[attr-defined]
+                return None
+            if time.time() >= deadline:
+                return None
+            if not _headroom_ok("burst"):
+                return None
+            if not pending and not queue_known_empty:
+                refill_locked()
+            if not pending:
+                return None
+            return pending.pop(0)
+
+    def record_run(lane: int, batch_id: str | None, outcomes: list[str], ran: int) -> None:
+        nonlocal processed
+        with state_lock:
+            processed += ran
+
+    threads: list[threading.Thread] = []
+    for i in range(1, lanes + 1):
+        t = threading.Thread(
+            target=_lane_worker,
+            args=(i, pop_next, record_run, "burst"),
+            daemon=False,
+            name=f"ao-lane-{i}",
+        )
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
 
     _log(f"burst finished — {processed} issue(s) processed.")
     return 0
@@ -689,11 +995,69 @@ def run_finish() -> int:
 
     issues.sort(key=lambda i: i.get("number", 0))
 
+    # Run finish inside lane 1's worktree so the user's main checkout is
+    # never disturbed (no branch hopping, no `git reset --hard`). The
+    # operations here are deterministic — rebases and merges, no LLM call
+    # unless we hit a conflict mid-way (then we resume the agent's session,
+    # which also runs in the worktree).
+    try:
+        finish_wt = _ensure_lane_worktree(1)
+    except (github_ops.GitError, github_ops.GhError, OSError) as exc:
+        _log(f"could not set up worktree: {exc}")
+        return 1
+    # Pin github_ops thread-local cwd for the duration of run_finish.
+    # Use bare enter/exit instead of `with` to avoid indenting the entire
+    # 150-line loop body below.
+    _finish_ctx = github_ops.in_dir(str(finish_wt))
+    _finish_ctx.__enter__()
+
     merged = 0
     skipped: list[tuple[int, str]] = []
 
     for issue_summary in issues:
         number = issue_summary["number"]
+        title = issue_summary.get("title", "")
+        run_id = _run_id(number)
+        start_ts = time.time()
+        usage_acc = {
+            "input_tokens": 0, "output_tokens": 0,
+            "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            "total_cost_usd": 0.0, "num_turns": 0,
+        }
+        # Live-run document for the cockpit. Branch/log_path/session_id
+        # filled in as we discover them. `mode=finish` so the UI can badge it.
+        record: dict = {
+            "run_id": run_id,
+            "issue_number": number,
+            "issue_title": title,
+            "session_id": "",
+            "mode": "finish",
+            "stop_after": cfg.stop_after,
+            "branch": None,
+            "started_at": _now_iso(),
+            "log_path": None,
+            "batch_id": None,
+            "batch_position": None,
+            "lane": 1,  # finish runs serially in lane 1 (no parallel finish yet)
+        }
+
+        def record_run(outcome: str, detail: str, *, pr_url: str | None = None) -> None:
+            usage_acc["total_cost_usd"] = round(usage_acc["total_cost_usd"], 6)
+            record.update(
+                outcome=outcome,
+                detail=detail,
+                finished_at=_now_iso(),
+                duration_sec=int(time.time() - start_ts),
+                usage=dict(usage_acc),
+                pr_url=pr_url,
+            )
+            _append_run_record(record)
+            # Don't clear here — the next iteration's _write_current
+            # will overwrite within milliseconds, avoiding a UI flicker.
+            # The terminal clear lives at the end of run_finish.
+
+        _write_current(record, "finish-check")
+
         try:
             prs = github_ops._gh_json([
                 "pr", "list", "--state", "open",
@@ -703,14 +1067,17 @@ def run_finish() -> int:
             ]) or []
         except github_ops.GhError as exc:
             _log(f"#{number}: could not find PR: {exc}")
+            record_run("failed", f"PR lookup failed: {exc}")
             skipped.append((number, f"PR lookup failed: {exc}"))
             continue
         if not prs:
             _log(f"#{number}: no open PR — assuming already merged or closed")
+            record_run("done", "no open PR — assumed already merged or closed")
             continue
         pr = prs[0]
         branch = pr["headRefName"]
         url = pr["url"]
+        record["branch"] = branch
 
         # GitHub may still be computing mergeability (especially right after
         # a sibling PR merged). Poll until it settles.
@@ -722,14 +1089,17 @@ def run_finish() -> int:
 
         # Plain merge if GitHub says it's clean.
         if pr.get("mergeable") == "MERGEABLE":
+            _write_current(record, "finish-merge")
             try:
                 github_ops.merge_pr(branch)
                 github_ops.comment(number, f"✅ Finished — merged via `make finish`. {url}")
                 _log(f"#{number}: merged {url}")
                 merged += 1
+                record_run("done", f"finish: merged cleanly — {url}", pr_url=url)
                 continue
             except github_ops.GhError as exc:
                 _log(f"#{number}: direct merge failed: {exc}")
+                record_run("failed", f"finish: direct merge failed: {exc}", pr_url=url)
                 skipped.append((number, f"direct merge failed: {exc}"))
                 continue
 
@@ -737,18 +1107,22 @@ def run_finish() -> int:
             # UNKNOWN / DRAFT / whatever — leave it to a human.
             state = pr.get("mergeStateStatus", "?")
             _log(f"#{number}: mergeable={pr.get('mergeable')} state={state}, skipping")
+            record_run("failed", f"finish: not mergeable (state={state})", pr_url=url)
             skipped.append((number, f"not mergeable (state={state})"))
             continue
 
         # Conflicting — mechanical rebase first.
         _log(f"#{number}: PR {url} conflicts with {cfg.base_branch}, attempting mechanical rebase…")
+        _write_current(record, "finish-rebase")
         ok, detail = _try_rebase_branch(branch)
 
         if ok:
             try:
+                _write_current(record, "finish-push")
                 github_ops.push_branch(branch)
                 # Wait for GitHub to recompute mergeable status before merging.
                 _poll_pr_mergeable(pr["number"])
+                _write_current(record, "finish-merge")
                 github_ops.merge_pr(branch)
                 github_ops.comment(
                     number,
@@ -757,9 +1131,11 @@ def run_finish() -> int:
                 )
                 _log(f"#{number}: rebased + merged {url}")
                 merged += 1
+                record_run("done", f"finish: mechanical rebase + merge — {url}", pr_url=url)
                 continue
             except (github_ops.GhError, github_ops.GitError) as exc:
                 _log(f"#{number}: rebase ok but push/merge failed: {exc}")
+                record_run("failed", f"finish: rebase ok but push/merge failed: {exc}", pr_url=url)
                 skipped.append((number, f"rebase ok but push/merge failed: {exc}"))
                 continue
 
@@ -767,6 +1143,7 @@ def run_finish() -> int:
         session_id = _latest_session_id_for_issue(number)
         if not session_id:
             _log(f"#{number}: rebase conflict, no prior agent session to resume — leaving for manual")
+            record_run("failed", "finish: rebase conflict; no agent session to resume", pr_url=url)
             skipped.append((number, "rebase conflict; no agent session to resume"))
             continue
 
@@ -776,16 +1153,27 @@ def run_finish() -> int:
         except github_ops.GhError:
             issue_full = issue_summary
 
-        run_id = _run_id(number)
         log_path = cfg.log_dir / f"{run_id}.log"
+        record["session_id"] = session_id
+        record["log_path"] = str(log_path)
+        _write_current(record, "finish-rebase")
         prompt = _compose_rebase_prompt(branch, cfg.base_branch, url)
         result = runner.run_agent(
             prompt, session_id, run_id, log_path, issue_full, "finish",
             resume=True,
         )
+        # Roll the agent's usage into this finish-run's record.
+        u = result.usage
+        usage_acc["input_tokens"] += u.input_tokens
+        usage_acc["output_tokens"] += u.output_tokens
+        usage_acc["cache_creation_input_tokens"] += u.cache_creation_input_tokens
+        usage_acc["cache_read_input_tokens"] += u.cache_read_input_tokens
+        usage_acc["total_cost_usd"] += u.total_cost_usd
+        usage_acc["num_turns"] += u.num_turns
 
         if not result.completed or result.exit_code != 0:
             _log(f"#{number}: agent rebase run failed (exit {result.exit_code}, timed_out={result.timed_out})")
+            record_run("failed", "finish: agent rebase failed", pr_url=url)
             skipped.append((number, "agent rebase failed"))
             continue
 
@@ -793,9 +1181,13 @@ def run_finish() -> int:
         refreshed = _poll_pr_mergeable(pr["number"]) or {}
         if refreshed.get("mergeable") != "MERGEABLE":
             _log(f"#{number}: still {refreshed.get('mergeable')} after agent rebase — leaving for manual")
+            record_run("failed",
+                       f"finish: agent rebase didn't clear conflicts ({refreshed.get('mergeable')})",
+                       pr_url=url)
             skipped.append((number, f"agent rebase didn't clear conflicts ({refreshed.get('mergeable')})"))
             continue
 
+        _write_current(record, "finish-merge")
         try:
             github_ops.merge_pr(branch)
             github_ops.comment(
@@ -805,10 +1197,14 @@ def run_finish() -> int:
             )
             _log(f"#{number}: agent-rebased + merged {url}")
             merged += 1
+            record_run("done", f"finish: agent rebase + merge — {url}", pr_url=url)
         except github_ops.GhError as exc:
             _log(f"#{number}: post-rebase merge failed: {exc}")
+            record_run("failed", f"finish: post-rebase merge failed: {exc}", pr_url=url)
             skipped.append((number, f"post-rebase merge failed: {exc}"))
 
+    _finish_ctx.__exit__(None, None, None)
+    _clear_current(lane=1)
     _log(f"finish complete — {merged} merged, {len(skipped)} skipped.")
     for n, reason in skipped:
         _log(f"  #{n}: {reason}")

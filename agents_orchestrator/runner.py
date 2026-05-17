@@ -62,12 +62,28 @@ class RunnerResult(NamedTuple):
 # Per-session allow list, granted to every spawned agent. Broad enough to
 # cover everything a coding agent needs across recent claude versions;
 # narrow enough that we're not just shrugging at the permission system.
+#
+# IMPORTANT — the more-specific-pattern-wins rule means a user's
+# `settings.json` "ask" entry like `Bash(git commit *)` beats our generic
+# `Bash(*)` allow. In a headless run there's no human to "ask", so the
+# tool call hangs and the agent gives up. To override, we must allow the
+# SAME or MORE-SPECIFIC pattern here. Anything you expect agents to run
+# routinely that a typical user might mark "ask" belongs in this list.
 _ALLOWED_TOOLS = (
     # File ops
     "Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
     # Shell — any command. The user's settings.json may still apply `deny`
     # rules (e.g., `rm -rf *`), which is the safety net we want.
     "Bash(*)",
+    # Specific patterns that commonly appear in user "ask" lists — these
+    # MUST be explicit so they beat the user's specific ask rule.
+    "Bash(git commit*)",
+    "Bash(git commit --*)",
+    "Bash(git commit -*)",
+    "Bash(git merge*)",
+    "Bash(git rebase*)",
+    "Bash(git cherry-pick*)",
+    "Bash(git revert*)",
     # Search
     "Glob", "Grep",
     # Web — with wildcard so any URL is fine.
@@ -234,28 +250,6 @@ INSTRUCTIONS:
   not commit."""
 
 
-def _write_current(run_id: str, issue: dict, session_id: str, cap_minutes: int, mode: str,
-                   *, batch_id: str | None = None) -> None:
-    cfg = config.load()
-    cfg.ensure_log_dir()
-    payload = {
-        "run_id": run_id,
-        "issue_number": issue.get("number"),
-        "issue_title": issue.get("title"),
-        "session_id": session_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "cap_minutes": cap_minutes,
-        "mode": mode,
-        "dry_run": cfg.dry_run,
-        "batch_id": batch_id,
-    }
-    cfg.current_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def _clear_current() -> None:
-    config.load().current_json.unlink(missing_ok=True)
-
-
 def run_agent(
     prompt: str,
     session_id: str,
@@ -267,6 +261,7 @@ def run_agent(
     name: str | None = None,
     resume: bool = False,
     batch_id: str | None = None,
+    cwd: Path | None = None,
 ) -> RunnerResult:
     """Run (or resume) a Claude session headless, under the time cap.
 
@@ -306,43 +301,41 @@ def run_agent(
         if name:
             cmd[1:1] = ["--name", name]
 
-    _write_current(run_id, issue, session_id, cap_minutes, mode, batch_id=batch_id)
+    # Note: current.json is written/cleared by the orchestrator, not here.
+    # The runner only owns the subprocess lifecycle.
     deadline = time.time() + cap_minutes * 60
     start_offset = log_path.stat().st_size if log_path.exists() else 0
-    try:
-        with log_path.open("a", encoding="utf-8") as log:
-            label = "RESUME" if resume else "START"
-            log.write(f"\n{'=' * 60}\nCLAUDE {label} — session {session_id} "
-                      f"(cap {cap_minutes}m)\n{'=' * 60}\n")
+    with log_path.open("a", encoding="utf-8") as log:
+        label = "RESUME" if resume else "START"
+        log.write(f"\n{'=' * 60}\nCLAUDE {label} — session {session_id} "
+                  f"(cap {cap_minutes}m)\n{'=' * 60}\n")
+        log.flush()
+        # start_new_session=True puts the agent in its own process group so
+        # a timeout kill takes down any child processes it spawned too.
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(cwd) if cwd else str(cfg.repo_root),
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            proc.wait(timeout=max(1, int(deadline - time.time())))
+        except subprocess.TimeoutExpired:
+            log.write(f"\n[orchestrator] run cap of {cap_minutes}m hit — killing agent\n")
             log.flush()
-            # start_new_session=True puts the agent in its own process group so
-            # a timeout kill takes down any child processes it spawned too.
-            proc = subprocess.Popen(
-                cmd,
-                cwd=str(cfg.repo_root),
-                env=env,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-            try:
-                proc.wait(timeout=max(1, int(deadline - time.time())))
-            except subprocess.TimeoutExpired:
-                log.write(f"\n[orchestrator] run cap of {cap_minutes}m hit — killing agent\n")
-                log.flush()
-                _kill_group(proc)
-                return RunnerResult(completed=False, timed_out=True,
-                                    exit_code=-1, usage=Usage.empty())
+            _kill_group(proc)
+            return RunnerResult(completed=False, timed_out=True,
+                                exit_code=-1, usage=Usage.empty())
 
-            usage = _parse_usage(log_path, start_offset)
-            return RunnerResult(
-                completed=True,
-                timed_out=False,
-                exit_code=proc.returncode,
-                usage=usage,
-            )
-    finally:
-        _clear_current()
+        usage = _parse_usage(log_path, start_offset)
+        return RunnerResult(
+            completed=True,
+            timed_out=False,
+            exit_code=proc.returncode,
+            usage=usage,
+        )
 
 
 def _parse_final_result(log_path: Path, start_offset: int) -> dict | None:
@@ -390,7 +383,8 @@ def _parse_usage(log_path: Path, start_offset: int) -> Usage:
     return _usage_from_result(_parse_final_result(log_path, start_offset))
 
 
-def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT") -> tuple[RunnerResult, str]:
+def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT",
+                cwd: Path | None = None) -> tuple[RunnerResult, str]:
     """Run a fresh, no-session Claude invocation and return its final text.
 
     Used by the auto-review stage. Inherits ``CLAUDE_CONFIG_DIR`` from the
@@ -420,7 +414,7 @@ def run_oneshot(prompt: str, log_path: Path, *, label: str = "ONESHOT") -> tuple
         log.flush()
         proc = subprocess.Popen(
             cmd,
-            cwd=str(cfg.repo_root),
+            cwd=str(cwd) if cwd else str(cfg.repo_root),
             env=env,
             stdout=log,
             stderr=subprocess.STDOUT,
