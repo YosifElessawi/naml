@@ -1,0 +1,30 @@
+# Legacy v1 format — fixture for migrate-config + dual-format loader tests.
+
+[repo]
+slug = "owner/example"
+base_branch = "main"
+
+[[gates]]
+name = "lint"
+argv = ["pnpm", "lint"]
+
+[[gates]]
+name = "test"
+argv = ["pnpm", "test"]
+
+[run]
+cap_minutes = 25
+max_retries = 1
+
+[burst]
+max_issues = 3
+max_hours = 2
+min_headroom = 6
+min_tokens = 150000
+
+[pipeline]
+stop_after = "merge"
+auto_review = false
+
+[claude]
+bin = "claude"
