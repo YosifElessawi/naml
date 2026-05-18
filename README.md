@@ -30,10 +30,10 @@ example). Naml picks up whatever those produce — issues labelled
 ### Clone it
 
 ```bash
-git clone https://github.com/YosifElessawi/naml.git ~/Desktop/Claudey
+git clone https://github.com/YosifElessawi/naml.git ~/Desktop/Naml
 ```
 
-(Any path works; the templates default to `~/Desktop/Claudey` but you can
+(Any path works; the templates default to `~/Desktop/Naml` but you can
 point `AO_HOME` at wherever you cloned it.)
 
 ### Per target repo
@@ -42,8 +42,8 @@ Drop two files at the repo's root:
 
 ```bash
 cd ~/Projects/your-repo
-cp ~/Desktop/Claudey/templates/Makefile .
-cp ~/Desktop/Claudey/templates/.agents-orchestrator.toml.example .agents-orchestrator.toml
+cp ~/Desktop/Naml/templates/Makefile .
+cp ~/Desktop/Naml/templates/.agents-orchestrator.toml.example .agents-orchestrator.toml
 ```
 
 Then edit `.agents-orchestrator.toml`:
@@ -57,8 +57,8 @@ Optional — drop the issue template and launchd plist if you want them:
 
 ```bash
 mkdir -p .github/ISSUE_TEMPLATE
-cp ~/Desktop/Claudey/templates/issue-template.yml .github/ISSUE_TEMPLATE/agent-task.yml
-cp ~/Desktop/Claudey/templates/launchd.plist.example com.naml.your-repo.plist
+cp ~/Desktop/Naml/templates/issue-template.yml .github/ISSUE_TEMPLATE/agent-task.yml
+cp ~/Desktop/Naml/templates/launchd.plist.example com.naml.your-repo.plist
 # edit the plist's TODO placeholders
 ```
 

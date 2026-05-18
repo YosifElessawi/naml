@@ -7,11 +7,11 @@
 # The unattended hourly mode (launchd) is OPT-IN — `make ao-on` enables it,
 # `make ao-off` stops it.
 #
-# Tool source lives at AO_HOME (default ~/Desktop/Claudey/). Per-project
+# Tool source lives at AO_HOME (default ~/Desktop/Naml/). Per-project
 # config lives next to this Makefile in .agents-orchestrator.toml.
 
 SHELL      := /bin/bash
-AO_HOME    ?= $(HOME)/Desktop/Claudey
+AO_HOME    ?= $(HOME)/Desktop/Naml
 AO         := python3 $(AO_HOME)/agents_orchestrator/orchestrator.py
 PLIST      ?= com.agents-orchestrator.$(shell basename "$$PWD").plist
 PLIST_DEST := $(HOME)/Library/LaunchAgents/$(PLIST)
