@@ -70,9 +70,7 @@ describe("SliceCard.full · Q5 Option A layout", () => {
 
   it("renders the state stripe via the modifier class", () => {
     const { container } = render(<SliceCard data={workingSliceFixture} />);
-    expect(
-      (container.firstChild as HTMLElement).classList.contains("naml-scard--work"),
-    ).toBe(true);
+    expect((container.firstChild as HTMLElement).classList.contains("naml-scard--work")).toBe(true);
   });
 });
 
@@ -218,9 +216,7 @@ describe("SliceCard.compact · lane kanban variant", () => {
   });
 
   it("applies the compact + state-modifier classes", () => {
-    const { container } = render(
-      <SliceCard data={workingSliceFixture} variant="compact" />,
-    );
+    const { container } = render(<SliceCard data={workingSliceFixture} variant="compact" />);
     const node = container.firstChild as HTMLElement;
     expect(node.classList.contains("naml-scard--compact")).toBe(true);
     expect(node.classList.contains("naml-scard--work")).toBe(true);

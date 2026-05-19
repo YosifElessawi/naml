@@ -9,12 +9,7 @@ interface CounterTweenProps {
 
 // Tweens a numeric value over ~400ms (default) using requestAnimationFrame.
 // Respects prefers-reduced-motion by snapping to the final value.
-export function CounterTween({
-  value,
-  format,
-  durationMs = 400,
-  className,
-}: CounterTweenProps) {
+export function CounterTween({ value, format, durationMs = 400, className }: CounterTweenProps) {
   const [display, setDisplay] = useState(value);
   const displayRef = useRef(value);
   const frameRef = useRef<number | null>(null);

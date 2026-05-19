@@ -33,7 +33,10 @@ export function contextSeverity(pct: number): "ok" | "warn" | "danger" {
   return "ok";
 }
 
-export function durationSeverity(elapsedSec: number, budgetSec: number | null): "ok" | "warn" | "danger" {
+export function durationSeverity(
+  elapsedSec: number,
+  budgetSec: number | null,
+): "ok" | "warn" | "danger" {
   if (!budgetSec || budgetSec <= 0) return "ok";
   const ratio = elapsedSec / budgetSec;
   if (ratio >= 1) return "danger";

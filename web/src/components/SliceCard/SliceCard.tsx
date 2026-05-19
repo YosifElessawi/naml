@@ -38,7 +38,7 @@ function stateModifier(state: SliceState): string {
 }
 
 export function SliceCard({ data, variant = "full" }: SliceCardProps) {
-  const cardRef = useRef<HTMLDivElement | null>(null);
+  const cardRef = useRef<HTMLElement | null>(null);
   const prevStateRef = useRef<SliceState>(data.state);
 
   // Card-flip animation on state change (FLIP — First, Last, Invert, Play).
@@ -66,7 +66,7 @@ export function SliceCard({ data, variant = "full" }: SliceCardProps) {
 
 interface InnerProps {
   data: SliceCardData;
-  cardRef: MutableRefObject<HTMLDivElement | null>;
+  cardRef: MutableRefObject<HTMLElement | null>;
 }
 
 function FullCard({ data, cardRef }: InnerProps) {
@@ -76,12 +76,11 @@ function FullCard({ data, cardRef }: InnerProps) {
   const pulses = PULSING_STATES.has(data.state);
 
   return (
-    <div
+    <article
       ref={cardRef}
       className={`naml-scard naml-scard--full naml-scard--${stateMod}`}
       data-state={data.state}
       data-variant="full"
-      role="article"
       aria-label={`slice ${data.id}: ${data.title} — ${stateLabel(data.state)}`}
     >
       <div className="naml-scard__row1">
@@ -126,10 +125,7 @@ function FullCard({ data, cardRef }: InnerProps) {
           label={data.context.label ?? "CONTEXT WINDOW"}
           value={
             <>
-              <CounterTween
-                value={data.context.pct}
-                format={(n) => `${Math.round(n)}%`}
-              />
+              <CounterTween value={data.context.pct} format={(n) => `${Math.round(n)}%`} />
               <span className="naml-scard__meter-budget">
                 {` · ${formatTokensShort(data.context.used)} / ${formatTokensShort(data.context.cap)}`}
               </span>
@@ -219,14 +215,14 @@ function FullCard({ data, cardRef }: InnerProps) {
       </div>
 
       {data.state === "held" ? (
-        <div className="naml-scard__held-banner" role="status">
+        <output className="naml-scard__held-banner">
           <span className="naml-scard__held-icon" aria-hidden="true">
             ⏸
           </span>
           <span className="naml-scard__held-text">
             {data.heldReason ? data.heldReason : "paused by user"}
           </span>
-        </div>
+        </output>
       ) : null}
 
       {data.state === "blocked_upstream" && data.dependsOn?.length ? (
@@ -251,9 +247,7 @@ function FullCard({ data, cardRef }: InnerProps) {
           <span className="naml-scard__stat-label">
             {data.review.verdict === "waiting" ? "VERDICT WAITING" : "VERDICT"}
           </span>
-          <span
-            className={`naml-scard__verdict naml-scard__verdict--${data.review.verdict}`}
-          >
+          <span className={`naml-scard__verdict naml-scard__verdict--${data.review.verdict}`}>
             {data.review.verdict === "waiting"
               ? "—"
               : data.review.verdict.toUpperCase().replace("_", " ")}
@@ -265,7 +259,7 @@ function FullCard({ data, cardRef }: InnerProps) {
       ) : null}
 
       {data.traversal?.length ? <Traversal steps={data.traversal} /> : null}
-    </div>
+    </article>
   );
 }
 
@@ -275,12 +269,11 @@ function CompactCard({ data, cardRef }: InnerProps) {
   const pulses = PULSING_STATES.has(data.state);
 
   return (
-    <div
+    <article
       ref={cardRef}
       className={`naml-scard naml-scard--compact naml-scard--${stateMod}`}
       data-state={data.state}
       data-variant="compact"
-      role="article"
       aria-label={`slice ${data.id}: ${data.title} — ${stateLabel(data.state)}`}
     >
       <div className="naml-scard__row1">
@@ -324,7 +317,7 @@ function CompactCard({ data, cardRef }: InnerProps) {
           </>
         ) : null}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -351,9 +344,7 @@ function Meter({
     <div className="naml-scard__meter">
       <div className="naml-scard__meter-head">
         <span className="naml-scard__meter-label">{label}</span>
-        <span
-          className={`naml-scard__meter-value naml-scard__meter-value--${valueSeverity}`}
-        >
+        <span className={`naml-scard__meter-value naml-scard__meter-value--${valueSeverity}`}>
           {value}
         </span>
       </div>

@@ -66,36 +66,70 @@
   width: 3px;
   background: var(--naml-scard-c-idle);
 }
-.naml-scard--pending::before { background: var(--naml-scard-c-idle); }
-.naml-scard--setup::before { background: var(--naml-scard-c-setup); }
-.naml-scard--work::before { background: var(--naml-scard-c-work); }
-.naml-scard--pr::before { background: var(--naml-scard-c-pr); }
-.naml-scard--review::before { background: var(--naml-scard-c-review); }
-.naml-scard--merged::before { background: var(--naml-scard-c-merged); }
-.naml-scard--failed::before { background: var(--naml-scard-c-failed); }
-.naml-scard--needs-human-review::before { background: var(--naml-scard-c-human); }
-.naml-scard--blocked-upstream::before { background: var(--naml-scard-c-blocked); }
-.naml-scard--abandoned::before { background: var(--naml-scard-c-failed); }
-.naml-scard--held::before { background: var(--naml-scard-c-warn); }
+.naml-scard--pending::before {
+  background: var(--naml-scard-c-idle);
+}
+.naml-scard--setup::before {
+  background: var(--naml-scard-c-setup);
+}
+.naml-scard--work::before {
+  background: var(--naml-scard-c-work);
+}
+.naml-scard--pr::before {
+  background: var(--naml-scard-c-pr);
+}
+.naml-scard--review::before {
+  background: var(--naml-scard-c-review);
+}
+.naml-scard--merged::before {
+  background: var(--naml-scard-c-merged);
+}
+.naml-scard--failed::before {
+  background: var(--naml-scard-c-failed);
+}
+.naml-scard--needs-human-review::before {
+  background: var(--naml-scard-c-human);
+}
+.naml-scard--blocked-upstream::before {
+  background: var(--naml-scard-c-blocked);
+}
+.naml-scard--abandoned::before {
+  background: var(--naml-scard-c-failed);
+}
+.naml-scard--held::before {
+  background: var(--naml-scard-c-warn);
+}
 
 .naml-scard--work {
   border-color: rgba(56, 189, 248, 0.35);
   background: linear-gradient(180deg, rgba(56, 189, 248, 0.04), var(--naml-scard-bg-1));
 }
-.naml-scard--review { border-color: rgba(251, 191, 36, 0.3); }
+.naml-scard--review {
+  border-color: rgba(251, 191, 36, 0.3);
+}
 .naml-scard--merged {
   border-color: rgba(52, 211, 153, 0.25);
   opacity: 0.92;
 }
-.naml-scard--failed { border-color: rgba(248, 113, 113, 0.4); }
-.naml-scard--needs-human-review { border-color: rgba(251, 146, 60, 0.4); }
-.naml-scard--blocked-upstream { opacity: 0.72; }
-.naml-scard--abandoned { opacity: 0.55; }
+.naml-scard--failed {
+  border-color: rgba(248, 113, 113, 0.4);
+}
+.naml-scard--needs-human-review {
+  border-color: rgba(251, 146, 60, 0.4);
+}
+.naml-scard--blocked-upstream {
+  opacity: 0.72;
+}
+.naml-scard--abandoned {
+  opacity: 0.55;
+}
 .naml-scard--held {
   border-color: rgba(251, 191, 36, 0.4);
   background: linear-gradient(180deg, rgba(251, 191, 36, 0.04), var(--naml-scard-bg-1));
 }
-.naml-scard--pending { opacity: 0.8; }
+.naml-scard--pending {
+  opacity: 0.8;
+}
 
 /* row 1: id + title + badges + state pill */
 .naml-scard__row1 {
@@ -168,18 +202,28 @@
   border-radius: 50%;
   background: currentColor;
 }
-.naml-scard__pill--pending { background: var(--naml-scard-bg-3); color: var(--naml-scard-text-2); }
-.naml-scard__pill--setup { background: rgba(107, 114, 128, 0.18); color: #d1d5db; }
+.naml-scard__pill--pending {
+  background: var(--naml-scard-bg-3);
+  color: var(--naml-scard-text-2);
+}
+.naml-scard__pill--setup {
+  background: rgba(107, 114, 128, 0.18);
+  color: #d1d5db;
+}
 .naml-scard__pill--work {
   background: rgba(56, 189, 248, 0.15);
   color: var(--naml-scard-c-work);
 }
-.naml-scard__pill--work .naml-scard__pill-dot { box-shadow: 0 0 6px var(--naml-scard-c-work); }
+.naml-scard__pill--work .naml-scard__pill-dot {
+  box-shadow: 0 0 6px var(--naml-scard-c-work);
+}
 .naml-scard__pill--pr {
   background: rgba(167, 139, 250, 0.15);
   color: var(--naml-scard-c-pr);
 }
-.naml-scard__pill--pr .naml-scard__pill-dot { box-shadow: 0 0 6px var(--naml-scard-c-pr); }
+.naml-scard__pill--pr .naml-scard__pill-dot {
+  box-shadow: 0 0 6px var(--naml-scard-c-pr);
+}
 .naml-scard__pill--review {
   background: rgba(251, 191, 36, 0.15);
   color: var(--naml-scard-c-review);
@@ -251,8 +295,12 @@
   text-align: right;
   min-width: 0;
 }
-.naml-scard__meter-value--warn { color: var(--naml-scard-c-warn); }
-.naml-scard__meter-value--danger { color: var(--naml-scard-c-danger); }
+.naml-scard__meter-value--warn {
+  color: var(--naml-scard-c-warn);
+}
+.naml-scard__meter-value--danger {
+  color: var(--naml-scard-c-danger);
+}
 .naml-scard__meter-budget {
   color: var(--naml-scard-text-3);
   font-weight: 400;
@@ -328,11 +376,21 @@
   color: var(--naml-scard-text-0);
   font-weight: 600;
 }
-.naml-scard__stat-value--warn { color: var(--naml-scard-c-warn); }
-.naml-scard__stat-value--danger { color: var(--naml-scard-c-danger); }
-.naml-scard__stat-pr { color: var(--naml-scard-c-accent); }
-.naml-scard__sep { color: var(--naml-scard-text-3); }
-.naml-scard__grow { flex: 1; }
+.naml-scard__stat-value--warn {
+  color: var(--naml-scard-c-warn);
+}
+.naml-scard__stat-value--danger {
+  color: var(--naml-scard-c-danger);
+}
+.naml-scard__stat-pr {
+  color: var(--naml-scard-c-accent);
+}
+.naml-scard__sep {
+  color: var(--naml-scard-text-3);
+}
+.naml-scard__grow {
+  flex: 1;
+}
 .naml-scard__session {
   font-family: var(--naml-scard-mono);
   color: var(--naml-scard-text-0);
