@@ -1,20 +1,20 @@
 """``naml`` command-line entry point.
 
-Phase 1 surface (intentionally tiny):
+Surface:
 
 - ``naml migrate-config [--dry-run] [--root PATH]``
 - ``naml show-config [--root PATH]``
-- ``naml inspect-sprint <sprint-dir>``  — read-only debug helper
+- ``naml inspect-sprint <sprint-dir>``
+- ``naml run <sprint-dir>``  — execute a sprint package (Phase 2)
 
-Later phases reintroduce the orchestrator commands (run, merge, status,
-serve) under this same ``naml`` entry point against the v2 sprint package
-format. Phase 2 (issue #4) adds ``naml run`` / ``naml merge``.
+Phase 3 (issue #5) adds the per-slice review state and ``naml merge``.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import shutil
 import sys
 from pathlib import Path
@@ -27,6 +27,7 @@ from .config import (
     load_config,
 )
 from .package import SprintError, load_sprint
+from .scheduler import ScheduleError
 
 
 def _cmd_migrate_config(args: argparse.Namespace) -> int:
@@ -149,7 +150,86 @@ def build_parser() -> argparse.ArgumentParser:
     p_insp.add_argument("sprint_dir", help="path to a .naml/sprints/<id>/ directory")
     p_insp.set_defaults(func=_cmd_inspect_sprint)
 
+    p_run = sub.add_parser(
+        "run",
+        help="execute a sprint package end-to-end (Phase 2: stops at PR-open)",
+    )
+    p_run.add_argument("sprint_dir", help="path to a .naml/sprints/<id>/ directory")
+    p_run.add_argument(
+        "--lanes",
+        type=int,
+        default=None,
+        help="override effective lane count (default: min(config.lanes.default, dag_width, hard_cap))",
+    )
+    p_run.add_argument(
+        "--overlap-policy",
+        choices=["strict", "abort", "warn"],
+        default="strict",
+        help="how to handle independent slices with overlapping touches "
+             "(default: strict — force serial)",
+    )
+    p_run.add_argument(
+        "--stop-after",
+        choices=["pr"],
+        default="pr",
+        help="pipeline stage to stop after (Phase 2 only supports 'pr')",
+    )
+    p_run.add_argument(
+        "--root",
+        help="config root (default: cwd or walked up)",
+    )
+    p_run.add_argument(
+        "--verbose", "-v", action="store_true", help="emit lane progress to stderr",
+    )
+    p_run.set_defaults(func=_cmd_run)
+
     return parser
+
+
+def _cmd_run(args: argparse.Namespace) -> int:
+    # Local import — only when actually running, so test suites and other
+    # subcommands don't pay for thread/runtime imports.
+    from . import run as run_mod
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    try:
+        cfg = load_config(Path(args.root) if args.root else None)
+    except ConfigError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        sprint = load_sprint(args.sprint_dir)
+    except SprintError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        report = run_mod.run_sprint(
+            sprint,
+            cfg,
+            overlap_policy=args.overlap_policy,
+            lane_count=args.lanes,
+            stop_after=args.stop_after,
+        )
+    except ScheduleError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    payload = {
+        "sprint_id": report.sprint_id,
+        "aggregate_state": report.aggregate_state,
+        "lanes_effective": report.lanes_effective,
+        "per_slice_state": report.per_slice_state,
+        "overlap_findings": [
+            {"earlier": a, "later": b, "overlap": g, "action": action}
+            for a, b, g, action in report.overlap_findings
+        ],
+    }
+    print(json.dumps(payload, indent=2))
+    return 0 if report.aggregate_state not in {"failed"} else 1
 
 
 def main(argv: list[str] | None = None) -> int:
