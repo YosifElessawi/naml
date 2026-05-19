@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -374,13 +375,30 @@ def rebase_abort(*, cwd: Path) -> None:
         pass
 
 
+# Seconds to sleep before retrying ``gh pr merge`` when GitHub reports
+# "Base branch was modified" — typically the lag between a fresh push and
+# GitHub recomputing mergeability.
+_BASE_MODIFIED_RETRY_DELAY_SECONDS = 8
+
+
 def merge_pr_squash(branch: str, *, cwd: Path, repo: str) -> None:
-    """``gh pr merge --squash --delete-branch`` for ``branch``."""
-    _run(
-        ["gh", "pr", "merge", branch,
-         "--repo", repo, "--squash", "--delete-branch"],
-        cwd=cwd,
-    )
+    """``gh pr merge --squash --delete-branch`` for ``branch``.
+
+    GitHub occasionally returns ``Base branch was modified`` immediately
+    after a push (a race between the push completing and GitHub finishing
+    its mergeability recomputation). When that specific error surfaces,
+    sleep briefly and retry once. Other ``gh`` errors propagate as-is.
+    """
+    cmd = ["gh", "pr", "merge", branch,
+           "--repo", repo, "--squash", "--delete-branch"]
+    try:
+        _run(cmd, cwd=cwd)
+        return
+    except GhError as first_err:
+        if "base branch was modified" not in str(first_err).lower():
+            raise
+    time.sleep(_BASE_MODIFIED_RETRY_DELAY_SECONDS)
+    _run(cmd, cwd=cwd)
 
 
 def pr_comment(branch: str, body: str, *, cwd: Path, repo: str) -> None:
