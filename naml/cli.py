@@ -14,6 +14,10 @@ Surface:
                                   configured gate's executable is missing)
 - ``naml retry <sprint-dir> <slice-id>`` — reset a failed slice's status
                                   so the next ``naml run`` reprocesses it
+- ``naml recover <sprint-dir> <slice-id>`` — read-only: print actionable
+                                  info about a slice's prior run (branch,
+                                  worktree, PR, commits since base) so the
+                                  user can manually inspect or salvage work
 - ``naml merge <sprint-dir>``  — walk review-clean slices through the
                                   4-tier merge pipeline (Phase 4 / MVP)
 """
@@ -24,6 +28,7 @@ import argparse
 import json
 import logging
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -171,6 +176,114 @@ def _cmd_retry(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_recover(args: argparse.Namespace) -> int:
+    from . import state as state_mod
+
+    sprint_root = Path(args.sprint_dir).expanduser().resolve()
+    if not sprint_root.is_dir():
+        print(
+            f"naml: sprint directory not found: {sprint_root}",
+            file=sys.stderr,
+        )
+        return 1
+
+    status = state_mod.load_slice_status(sprint_root, args.slice_id)
+    if status is None:
+        print(
+            f"naml: no status file for slice {args.slice_id!r} under {sprint_root}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Try to discover the sprint's configured base_branch from the manifest;
+    # fall back to "main" if the manifest isn't parseable from here. Recover
+    # is best-effort — never abort on a stale/missing manifest.
+    base_branch = "main"
+    try:
+        from .package import load_sprint as _load_sprint  # local import
+        sprint = _load_sprint(sprint_root)
+        if sprint.base_branch:
+            base_branch = sprint.base_branch
+    except Exception:  # noqa: BLE001 — recover is best-effort
+        pass
+
+    # Header.
+    print(f"{status.slice_id} (state={status.state})")
+
+    def _line(label: str, value: str) -> None:
+        print(f"  {label:<12} {value}")
+
+    _line("worktree:", status.worktree or "(none recorded)")
+    _line("branch:", status.branch or "(none recorded)")
+    if status.pr_url:
+        _line("pr_url:", status.pr_url)
+    if status.last_error:
+        _line("last_error:", status.last_error)
+    if status.attempts:
+        _line("attempts:", json.dumps(status.attempts, sort_keys=True))
+    if status.session_id:
+        _line("session_id:", status.session_id)
+
+    # Commits on the slice branch, listed from the worktree's git context.
+    print()
+    wt = Path(status.worktree) if status.worktree else None
+    branch = status.branch
+    if not wt or not wt.is_dir():
+        print("  Commits on this branch:")
+        print("    (worktree directory no longer exists)")
+    elif not branch:
+        print("  Commits on this branch:")
+        print("    (no branch recorded for this slice)")
+    else:
+        print(f"  Commits on this branch (since {base_branch}):")
+        try:
+            result = subprocess.run(  # noqa: S603 — argv list, not shell
+                [
+                    "git", "log", "--oneline",
+                    f"{base_branch}..{branch}", "--",
+                ],
+                cwd=wt,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            print(f"    (git log failed: {exc})")
+        else:
+            if result.returncode != 0:
+                stderr = (result.stderr or "").strip().splitlines()
+                detail = stderr[-1] if stderr else f"exit {result.returncode}"
+                print(f"    (git log failed: {detail})")
+            else:
+                lines = result.stdout.splitlines()
+                if not lines:
+                    print("    (no commits on this branch)")
+                else:
+                    for line in lines:
+                        print(f"    {line}")
+
+    # Summary file pointer (the implementer agent writes one per slice).
+    summary_p = state_mod.summary_path(sprint_root, status.slice_id)
+    if summary_p.is_file():
+        try:
+            n_lines = sum(1 for _ in summary_p.open("r", encoding="utf-8"))
+        except OSError:
+            n_lines = 0
+        print()
+        print("  Summary written by the agent:")
+        # Show the path RELATIVE to sprint_root.parent.parent (i.e. the
+        # ``.naml/sprints/<id>/state/...`` form) when possible so it's
+        # copy-pasteable into ``cat``.
+        try:
+            rel = summary_p.relative_to(sprint_root.parent.parent)
+        except ValueError:
+            rel = summary_p
+        print(f"    {rel} ({n_lines} lines)")
+
+    return 0
+
+
 def _cmd_show_config(args: argparse.Namespace) -> int:
     try:
         cfg = load_config(Path(args.root) if args.root else None)
@@ -295,6 +408,22 @@ def build_parser() -> argparse.ArgumentParser:
              "convention; this subcommand does not read config directly",
     )
     p_retry.set_defaults(func=_cmd_retry)
+
+    p_recover = sub.add_parser(
+        "recover",
+        help="read-only: print actionable info about a slice's prior run",
+    )
+    p_recover.add_argument(
+        "sprint_dir",
+        help="path to a .naml/sprints/<id>/ directory",
+    )
+    p_recover.add_argument("slice_id", help="slice id (e.g. slice-1)")
+    p_recover.add_argument(
+        "--root",
+        help="config root (default: cwd or walked up); accepted for "
+             "convention; this subcommand does not read config directly",
+    )
+    p_recover.set_defaults(func=_cmd_recover)
 
     p_merge = sub.add_parser(
         "merge",
