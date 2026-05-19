@@ -166,13 +166,23 @@ def _cmd_retry(args: argparse.Namespace) -> int:
     status.state = states_mod.PENDING
     status.attempts = {}
     status.last_error = ""
+    # Clear the session_id too. Leaving it behind would let Bug 2 bite on
+    # the next ``naml run``: Claude rejects spawn with "Session ID is
+    # already in use" when a consumed UUID is re-used. The lane regenerates
+    # session_id on every claim anyway, but we wipe it here so the
+    # persisted file accurately reflects "this slice has not been claimed
+    # by any session yet".
+    status.session_id = ""
     status.record_transition(
         state=states_mod.PENDING,
         detail="retry requested via naml retry",
     )
     state_mod.save_slice_status(sprint_root, status)
 
-    print(f"retried {args.slice_id}: state=pending, attempts cleared")
+    print(
+        f"retried {args.slice_id}: state=pending, "
+        f"attempts + session_id cleared"
+    )
     return 0
 
 

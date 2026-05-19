@@ -74,12 +74,18 @@ class RetrySuccessTests(_SprintRootMixin, unittest.TestCase):
         self.assertEqual(rc, 0, msg=err)
         self.assertIn("slice-1", out)
         self.assertIn("pending", out)
+        # New wording flags the session_id clear so users see why the
+        # next naml run won't hit "Session ID already in use".
+        self.assertIn("session_id", out)
 
         reloaded = state_mod.load_slice_status(self._sprint, "slice-1")
         assert reloaded is not None
         self.assertEqual(reloaded.state, states_mod.PENDING)
         self.assertEqual(reloaded.attempts, {})
         self.assertEqual(reloaded.last_error, "")
+        # session_id is cleared so the next naml run mints a fresh one
+        # (the persisted seed was "abc-123" — see _write_status).
+        self.assertEqual(reloaded.session_id, "")
 
     def test_extends_transitions_with_retry_record(self) -> None:
         self._write_status("slice-1", state=states_mod.FAILED)
