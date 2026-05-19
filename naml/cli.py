@@ -7,6 +7,8 @@ Surface:
 - ``naml inspect-sprint <sprint-dir>``
 - ``naml status``              — print the project + current sprint + slice
                                   hierarchy (same payload as /api/state)
+- ``naml serve [--bind H] [--port P]`` — HTTP server exposing /api/state
+                                  for the dashboard
 - ``naml run <sprint-dir>``    — execute a sprint package
 - ``naml merge <sprint-dir>``  — walk review-clean slices through the
                                   4-tier merge pipeline (Phase 4 / MVP)
@@ -109,6 +111,21 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_serve(args: argparse.Namespace) -> int:
+    from . import web as web_mod
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    try:
+        cfg = load_config(Path(args.root) if args.root else None)
+    except ConfigError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    web_mod.serve(cfg, host=args.bind, port=args.port)
+    return 0
+
+
 def _cmd_show_config(args: argparse.Namespace) -> int:
     try:
         cfg = load_config(Path(args.root) if args.root else None)
@@ -165,6 +182,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_status.add_argument("--root", help="config root (default: cwd or walked up)")
     p_status.set_defaults(func=_cmd_status)
+
+    p_serve = sub.add_parser(
+        "serve",
+        help="run an HTTP server exposing /api/state for the dashboard",
+    )
+    p_serve.add_argument("--bind", default="127.0.0.1", help="host to bind (default: 127.0.0.1)")
+    p_serve.add_argument("--port", type=int, default=7777, help="port (default: 7777)")
+    p_serve.add_argument("--root", help="config root (default: cwd or walked up)")
+    p_serve.set_defaults(func=_cmd_serve)
 
     p_insp = sub.add_parser(
         "inspect-sprint",
