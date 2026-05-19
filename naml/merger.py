@@ -533,7 +533,24 @@ class _SliceMerger:
     def _fail_with_blocked(
         self, detail: str, started_at: str, t0: float, *, last_tier: int,
     ) -> MergeOutcome:
-        """Cap-induced stop: mark merge_blocked at the cap-reached tier."""
+        """Cap-induced stop: mark merge_blocked at the cap-reached tier.
+
+        Post a PR comment with the tier history — same human-escalation
+        artefact as a full Tier-4 path. A `merge_blocked` slice is always
+        accompanied by a comment so the human has something to land on.
+        """
+        # Abort any in-progress rebase so the worktree state is sane.
+        if self.status.worktree:
+            wt = Path(self.status.worktree)
+            if wt.is_dir():
+                gitops.rebase_abort(cwd=wt)
+        _post_blocked_comment(
+            self.cfg,
+            cwd=self.cfg.repo_root,
+            branch=self.branch,
+            slice_id=self.slice.id,
+            tier_history=self.tier_history,
+        )
         _slice_transition(
             self.sprint_root, self.status, states.MERGE_BLOCKED,
             detail=f"tier_cap={last_tier} reached: {detail}",

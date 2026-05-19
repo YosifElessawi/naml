@@ -227,6 +227,56 @@ class TopologicalAndSkipTests(unittest.TestCase):
         # slice-1 in NEEDS_HUMAN_REVIEW must skip.
         self.assertEqual(called, ["slice-2"])
 
+    def test_tier_cap_posts_pr_comment(self) -> None:
+        """A tier_cap-induced merge_blocked must post the PR comment too —
+        not just transition state. Same human-escalation contract as a
+        full Tier-4 escalation."""
+        from naml import merger as merger_mod
+
+        comments: list[tuple[str, str]] = []
+
+        def fake_pr_comment(branch, body, *, cwd, repo):  # noqa: ARG001
+            comments.append((branch, body))
+
+        # Stand up a minimal SliceMerger + drive _fail_with_blocked.
+        sprint = _FakeSprint([_FakeSlice("slice-x")])
+        self._seed_status("slice-x", states.MERGING)
+        sprint_root = self.cfg.sprints_path / "2026-05-19-fake"
+        status = state_mod.load_slice_status(sprint_root, "slice-x")
+        assert status is not None
+        m = merger_mod._SliceMerger(
+            sprint=sprint,
+            cfg=self.cfg,
+            sprint_root=sprint_root,
+            log_dir=self._tmp / "merger-log",
+            status=status,
+            slice_=sprint.slices[0],
+        )
+        m.tier_history = [
+            (1, "rebase paused on conflicts"),
+            (2, "no scripted resolver for `cli.py`"),
+        ]
+
+        with patch("naml.merger.gitops.pr_comment", fake_pr_comment), \
+             patch("naml.merger.gitops.rebase_abort", lambda **_: None):
+            outcome = m._fail_with_blocked(
+                "no scripted resolver for `cli.py`",
+                "2026-05-19T11:00:00+00:00",
+                0.0,
+                last_tier=2,
+            )
+
+        self.assertFalse(outcome.success)
+        self.assertEqual(outcome.tier, 2)
+        self.assertEqual(len(comments), 1)
+        _branch, body = comments[0]
+        self.assertIn("merge_blocked on `slice-x`", body)
+        # Tier-by-tier history is present.
+        self.assertIn("Tier 1", body)
+        self.assertIn("rebase paused", body)
+        self.assertIn("Tier 2", body)
+        self.assertIn("no scripted resolver", body)
+
     def test_merging_slice_is_resumable(self) -> None:
         """A slice stuck in MERGING from a prior interrupted run should be
         retried (not silently skipped like MERGED, and not log-skipped like
