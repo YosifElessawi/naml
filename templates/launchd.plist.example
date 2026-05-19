@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  agents-orchestrator — launchd template.
+  ============================================================================
+  STALE: This template wires up the v1 launchd loop that pointed at
+  `agents_orchestrator/orchestrator.py`. That package was removed when the
+  project was renamed to Naml. The v2 orchestrator entry point is being
+  rebuilt against the sprint-package format and ships in Phase 2 (issue #4).
+
+  Until #4 lands this template won't load — keep it here for reference and
+  follow the issue for the updated version.
+  ============================================================================
+
+  Original v1 instructions kept below for context:
 
   TO USE:
     1. Copy this file into the target repo's root, renamed to match its

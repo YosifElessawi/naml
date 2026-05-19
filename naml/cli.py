@@ -3,11 +3,12 @@
 Phase 1 surface (intentionally tiny):
 
 - ``naml migrate-config [--dry-run] [--root PATH]``
+- ``naml show-config [--root PATH]``
 - ``naml inspect-sprint <sprint-dir>``  — read-only debug helper
 
-Later phases will fold the orchestrator commands (run, merge, status, serve)
-into this CLI; for now the v1 ``agents_orchestrator`` script keeps running
-those.
+Later phases reintroduce the orchestrator commands (run, merge, status,
+serve) under this same ``naml`` entry point against the v2 sprint package
+format. Phase 2 (issue #4) adds ``naml run`` / ``naml merge``.
 """
 
 from __future__ import annotations

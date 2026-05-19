@@ -3,11 +3,12 @@
 Reads ``.naml/config.toml`` (preferred) or the legacy ``.agents-orchestrator.toml``
 and exposes a single ``NamlConfig`` dataclass.
 
-The schema is a strict superset of the v1 file: every v1 key keeps its meaning,
-and v2 adds ``[paths]`` (sprint directory location, feedback inbox path) and
-``[lanes]`` (default lane count, hard cap). The discovery walk is independent
-from the legacy ``agents_orchestrator.config`` module — v1 code stays usable
-during the migration window.
+The schema is a strict superset of the v1 file: every v1 key keeps its
+meaning, and v2 adds ``[paths]`` (sprint directory location, feedback inbox
+path) and ``[lanes]`` (default lane count, hard cap). The legacy filename
+stays supported so existing target repos can run ``naml migrate-config``
+on their own time instead of being forced to flip files in lockstep with
+this commit.
 """
 
 from __future__ import annotations
@@ -216,8 +217,7 @@ def _resolve_path(value: Any, default: Path, base: Path) -> Path:
 def load_config(start: Path | None = None) -> NamlConfig:
     """Discover and parse the project config. Returns a frozen ``NamlConfig``.
 
-    No env-var overrides — the legacy ``agents_orchestrator.config`` module
-    keeps those for v1. V2 will reintroduce env overrides intentionally in a
+    No env-var overrides yet. V2 will reintroduce them intentionally in a
     later phase, scoped to the keys that actually need runtime tuning.
     """
     path, fmt = find_config_file(start)
