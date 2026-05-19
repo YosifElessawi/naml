@@ -38,6 +38,7 @@ from typing import Iterable
 
 from . import claude as claude_mod
 from . import gitops
+from . import project_state as project_state_mod
 from . import prompts
 from . import resolvers
 from . import state as state_mod
@@ -678,6 +679,15 @@ def merge_sprint(
         )
     state_mod.save_sprint_state(sprint_root, sprint_state)
     report.sprint_state = final
+
+    project_state_mod.on_sprint_merge_finished(
+        project_state_mod.naml_dir_for(cfg),
+        sprint.id,
+        sprint_state=final,
+        merged_count=report.merged_count(),
+        blocked_count=report.blocked_count(),
+    )
+
     return report
 
 
