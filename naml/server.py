@@ -43,7 +43,7 @@ def _state_response(cfg: Any, if_none_match: str | None) -> web.Response:
     etag = f'W/"{digest}"'
 
     if if_none_match and if_none_match.strip() == etag:
-        return web.Response(status=304, headers={"ETag": etag})
+        return web.Response(status=304, body=b"", headers={"ETag": etag})
 
     return web.Response(
         status=200,
