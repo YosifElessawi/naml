@@ -257,6 +257,52 @@ class AggregatesEndpointTests(AioHTTPTestCase):
         )
 
 
+class IntervenePostTests(_ServerIntegrationBase):
+    """POST ``/intervene/{slice_id}`` is the drawer's intervention surface."""
+
+    async def test_hold_returns_200_accepted_stub(self) -> None:
+        resp = await self.client.post("/intervene/slice-4?action=hold")
+        self.assertEqual(resp.status, 200)
+        body = await resp.json()
+        self.assertEqual(body["status"], "accepted")
+        self.assertEqual(body["action"], "hold")
+        self.assertEqual(body["slice_id"], "slice-4")
+
+    async def test_fail_and_skip_return_200(self) -> None:
+        for action in ("fail", "skip"):
+            resp = await self.client.post(f"/intervene/slice-4?action={action}")
+            self.assertEqual(resp.status, 200, action)
+            body = await resp.json()
+            self.assertEqual(body["action"], action)
+
+    async def test_unknown_action_returns_400(self) -> None:
+        resp = await self.client.post("/intervene/slice-4?action=detonate")
+        self.assertEqual(resp.status, 400)
+        body = await resp.json()
+        self.assertIn("error", body)
+        self.assertIn("hold", body["valid"])
+
+    async def test_missing_action_returns_400(self) -> None:
+        resp = await self.client.post("/intervene/slice-4")
+        self.assertEqual(resp.status, 400)
+
+    async def test_open_terminal_is_handled(self) -> None:
+        """Verifies the route exists and answers without actually spawning
+        Terminal in CI. We monkey-patch ``_spawn_terminal`` so the test is
+        deterministic on macOS too."""
+        original = server_mod._spawn_terminal
+        server_mod._spawn_terminal = lambda *_args, **_kw: False  # type: ignore[assignment]
+        try:
+            resp = await self.client.post("/intervene/slice-4?action=open-terminal")
+            self.assertIn(resp.status, (200, 202))
+            body = await resp.json()
+            self.assertEqual(body["action"], "open-terminal")
+            self.assertIn("launched", body)
+            self.assertFalse(body["launched"])
+        finally:
+            server_mod._spawn_terminal = original  # type: ignore[assignment]
+
+
 class BuiltIndexTests(AioHTTPTestCase):
     """Same as above but writes a fake bundle first to prove `/` serves it."""
 
