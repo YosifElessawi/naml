@@ -1,29 +1,44 @@
-"""Tests for naml.aggregator — the in-memory metrics rollup.
+"""Tests for naml.aggregator — in-memory metrics rollup + time-window views.
 
-Covers slice-10's acceptance criteria for the aggregator:
+Covers the union of slice-10 (data shape + ``snapshot``) and slice-12
+(``project`` flat-field view + ``roll_day`` + ``MetricTickPayload`` +
+``replay_jsonl``) acceptance criteria:
 
 - ``apply_event`` is O(1) per event (asserted by wall-clock on 10k events).
 - per_slice / per_sprint / per_project totals match expected sums.
-- today / this_week / last_30d / lifetime windows are computed from
-  UTC daily buckets — DST-safe.
+- today / this_week / last_30d / lifetime windows are computed from UTC
+  daily buckets (snapshot shape) and from the live ``project`` view.
+- UTC day rollover resets ``today`` only; week/30d/lifetime keep
+  accumulating across midnight.
+- ``MetricTickPayload`` returned by ``apply_event`` carries the rollups
+  contract slice-12 ships to the cockpit.
 - ``reset`` clears all aggregates; the caller can re-replay.
 - ``snapshot`` exposes the shape the SSE consumer (slice-12) needs.
 """
 
 from __future__ import annotations
 
+import json
+import shutil
+import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 from naml.aggregator import (
     MONTH_DAYS,
     WEEK_DAYS,
     Aggregator,
+    MetricTickPayload,
+    ProjectMetrics,
     SliceMetrics,
     SprintMetrics,
     WindowTotals,
 )
+
+
+UTC = timezone.utc
 
 
 def _event(
@@ -39,7 +54,10 @@ def _event(
     cost_usd: float = 0.01,
     ctx_pct: int = 10,
 ) -> dict:
-    """Build a token-event dict matching the JSONL schema in spec Q8b."""
+    """Build a token-event dict matching the JSONL schema in spec Q8b.
+
+    Used by the slice-10 test surface (named ``cost_usd``).
+    """
     return {
         "t": t.astimezone(timezone.utc).isoformat(),
         "slice": slice_id,
@@ -52,6 +70,38 @@ def _event(
         "cost_usd": cost_usd,
         "ctx_pct": ctx_pct,
     }
+
+
+def _ev(
+    *,
+    t: datetime,
+    slice_id: str = "slice-1",
+    cost: float = 0.10,
+    tokens_in: int = 1_000,
+    tokens_out: int = 200,
+    cache_read: int = 50_000,
+    cache_write: int = 0,
+    ctx_pct: int = 25,
+    session: str = "abc",
+    turn: int = 1,
+) -> dict:
+    """Slice-12 test helper. Same shape as :func:`_event` but with
+    different defaults (cache-heavy turn) and a shorter parameter name."""
+    return {
+        "t": t.isoformat(),
+        "slice": slice_id,
+        "session": session,
+        "turn": turn,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "cache_read": cache_read,
+        "cache_write": cache_write,
+        "cost_usd": cost,
+        "ctx_pct": ctx_pct,
+    }
+
+
+# --- slice-10 surface -------------------------------------------------------
 
 
 class ApplyEventTests(unittest.TestCase):
@@ -141,7 +191,8 @@ class WindowTotalsTests(unittest.TestCase):
     """The today / week / 30d / lifetime split is the cockpit headline.
 
     These tests use a frozen ``now`` so we can plant events at known
-    distances and assert which windows they fall into.
+    distances and assert which windows they fall into. They exercise the
+    slice-10 ``snapshot`` shape (rolling 7-day ``this_week``).
     """
 
     def setUp(self) -> None:
@@ -355,6 +406,329 @@ class DataclassReprTests(unittest.TestCase):
 
         p = SprintMetrics(sprint_id="y", tokens_in=10)
         self.assertEqual(p.to_dict()["sprint_id"], "y")
+
+
+# --- slice-12 surface -------------------------------------------------------
+
+
+class _FrozenClock:
+    """Manually-advanceable clock for deterministic boundary tests."""
+
+    def __init__(self, start: datetime) -> None:
+        self._now = start
+
+    def __call__(self) -> datetime:
+        return self._now
+
+    def set(self, value: datetime) -> None:
+        self._now = value
+
+    def advance(self, delta: timedelta) -> None:
+        self._now = self._now + delta
+
+
+class TimeWindowBasicsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Wednesday 2026-05-20 14:00 UTC. Week start (Mon) = 2026-05-18.
+        self.clock = _FrozenClock(datetime(2026, 5, 20, 14, 0, tzinfo=UTC))
+        self.agg = Aggregator(now_fn=self.clock)
+
+    def test_today_event_lands_in_all_windows(self) -> None:
+        payload = self.agg.apply_event(_ev(t=self.clock(), cost=0.50))
+        assert payload is not None
+        p = self.agg.project
+        self.assertAlmostEqual(p.today_cost, 0.50)
+        self.assertAlmostEqual(p.week_cost, 0.50)
+        self.assertAlmostEqual(p.last_30d_cost, 0.50)
+        self.assertAlmostEqual(p.lifetime_cost, 0.50)
+
+    def test_yesterday_event_skips_today_only(self) -> None:
+        yesterday = self.clock() - timedelta(days=1)  # still in same week
+        self.agg.apply_event(_ev(t=yesterday, cost=0.30))
+        p = self.agg.project
+        self.assertAlmostEqual(p.today_cost, 0.0)
+        self.assertAlmostEqual(p.week_cost, 0.30)
+        self.assertAlmostEqual(p.last_30d_cost, 0.30)
+        self.assertAlmostEqual(p.lifetime_cost, 0.30)
+
+    def test_old_event_only_in_lifetime(self) -> None:
+        ancient = self.clock() - timedelta(days=90)
+        self.agg.apply_event(_ev(t=ancient, cost=0.25))
+        p = self.agg.project
+        self.assertAlmostEqual(p.today_cost, 0.0)
+        self.assertAlmostEqual(p.week_cost, 0.0)
+        self.assertAlmostEqual(p.last_30d_cost, 0.0)
+        self.assertAlmostEqual(p.lifetime_cost, 0.25)
+
+    def test_lifetime_origin_pinned_to_first_event(self) -> None:
+        early = self.clock() - timedelta(days=10)
+        later = self.clock() - timedelta(days=1)
+        self.agg.apply_event(_ev(t=later, cost=0.10))
+        self.agg.apply_event(_ev(t=early, cost=0.20))  # apply out-of-order
+        # first_event_at should be the earliest observed timestamp.
+        self.assertTrue(self.agg.project.first_event_at.startswith("2026-05-10"))
+
+    def test_week_boundary_monday_start(self) -> None:
+        # An event on Sunday 2026-05-17 is the PREVIOUS week (Mon-Sun ISO).
+        # Current week (per spec.md Monday start) = 2026-05-18 → 2026-05-24.
+        sunday = datetime(2026, 5, 17, 23, 59, tzinfo=UTC)
+        self.agg.apply_event(_ev(t=sunday, cost=0.30))
+        self.assertAlmostEqual(self.agg.project.week_cost, 0.0)
+        self.assertAlmostEqual(self.agg.project.last_30d_cost, 0.30)
+
+        monday = datetime(2026, 5, 18, 0, 1, tzinfo=UTC)
+        self.agg.apply_event(_ev(t=monday, cost=0.40))
+        self.assertAlmostEqual(self.agg.project.week_cost, 0.40)
+
+
+class DayRolloverTests(unittest.TestCase):
+    """Simulates the user running a sprint across midnight UTC — today resets,
+    week/30d/lifetime keep accumulating."""
+
+    def setUp(self) -> None:
+        # 2026-05-20 23:55 UTC — five minutes before midnight.
+        self.clock = _FrozenClock(datetime(2026, 5, 20, 23, 55, tzinfo=UTC))
+        self.agg = Aggregator(now_fn=self.clock)
+
+    def test_midnight_rollover_resets_today_only(self) -> None:
+        # Three turns before midnight.
+        for i in range(3):
+            self.agg.apply_event(
+                _ev(t=self.clock(), cost=0.10, turn=i + 1)
+            )
+        p = self.agg.project
+        self.assertAlmostEqual(p.today_cost, 0.30)
+        self.assertAlmostEqual(p.week_cost, 0.30)
+        self.assertAlmostEqual(p.lifetime_cost, 0.30)
+
+        # Cross midnight. The cron tick fires from server.py.
+        self.clock.advance(timedelta(minutes=10))  # 2026-05-21 00:05 UTC
+        rolled = self.agg.roll_day()
+        self.assertTrue(rolled)
+        p = self.agg.project
+        self.assertAlmostEqual(p.today_cost, 0.0)
+        # Yesterday's events stay inside the week + 30d windows.
+        self.assertAlmostEqual(p.week_cost, 0.30)
+        self.assertAlmostEqual(p.last_30d_cost, 0.30)
+        self.assertAlmostEqual(p.lifetime_cost, 0.30)
+
+        # A fresh event after rollover lands only in today again.
+        self.agg.apply_event(_ev(t=self.clock(), cost=0.05))
+        p = self.agg.project
+        self.assertAlmostEqual(p.today_cost, 0.05)
+        self.assertAlmostEqual(p.week_cost, 0.35)
+
+    def test_roll_day_idempotent_when_same_day(self) -> None:
+        self.agg.apply_event(_ev(t=self.clock(), cost=0.10))
+        self.assertFalse(self.agg.roll_day())
+        self.assertAlmostEqual(self.agg.project.today_cost, 0.10)
+
+    def test_apply_event_self_heals_across_midnight(self) -> None:
+        """If the clock crosses midnight between cron ticks, ``apply_event``
+        must detect the date change and reset today before adding the new
+        event — otherwise today_cost includes yesterday's accumulated cost."""
+        self.agg.apply_event(_ev(t=self.clock(), cost=0.40))
+        self.assertAlmostEqual(self.agg.project.today_cost, 0.40)
+
+        # Cross midnight WITHOUT a roll_day cron call.
+        self.clock.advance(timedelta(minutes=10))  # 2026-05-21 00:05 UTC
+        self.agg.apply_event(_ev(t=self.clock(), cost=0.05))
+        # today_cost should reflect the new day only.
+        self.assertAlmostEqual(self.agg.project.today_cost, 0.05)
+        self.assertAlmostEqual(self.agg.project.lifetime_cost, 0.45)
+
+    def test_30d_eviction_on_rollover(self) -> None:
+        """An event that was within 30d before rollover should fall out if
+        the rollover moves the 30-day floor past it."""
+        # Event 31 days before "now" — already outside the 30d window.
+        ancient = self.clock() - timedelta(days=31)
+        self.agg.apply_event(_ev(t=ancient, cost=0.20))
+        self.assertAlmostEqual(self.agg.project.last_30d_cost, 0.0)
+
+        # Event 29 days before "now" — inside 30d.
+        within = self.clock() - timedelta(days=29)
+        self.agg.apply_event(_ev(t=within, cost=0.30))
+        self.assertAlmostEqual(self.agg.project.last_30d_cost, 0.30)
+
+        # Roll the clock forward 2 days → the 29-day-old event becomes 31d.
+        self.clock.advance(timedelta(days=2))
+        self.agg.roll_day()
+        self.assertAlmostEqual(self.agg.project.last_30d_cost, 0.0)
+        self.assertAlmostEqual(self.agg.project.lifetime_cost, 0.50)
+
+
+class PerSliceAndSprintTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.clock = _FrozenClock(datetime(2026, 5, 20, 14, 0, tzinfo=UTC))
+        self.agg = Aggregator(now_fn=self.clock)
+
+    def test_per_slice_running_totals(self) -> None:
+        self.agg.apply_event(_ev(t=self.clock(), slice_id="slice-4", cost=0.10))
+        self.agg.apply_event(_ev(t=self.clock(), slice_id="slice-4", cost=0.20))
+        self.agg.apply_event(_ev(t=self.clock(), slice_id="slice-7", cost=0.05))
+        s4 = self.agg.per_slice["slice-4"]
+        s7 = self.agg.per_slice["slice-7"]
+        self.assertAlmostEqual(s4.cost_usd, 0.30)
+        self.assertEqual(s4.turns, 2)
+        self.assertAlmostEqual(s7.cost_usd, 0.05)
+        self.assertEqual(s7.turns, 1)
+
+    def test_sprint_rollup(self) -> None:
+        self.agg.apply_event(
+            _ev(t=self.clock(), slice_id="slice-4", cost=0.10), sprint_id="sp1"
+        )
+        self.agg.apply_event(
+            _ev(t=self.clock(), slice_id="slice-7", cost=0.20), sprint_id="sp1"
+        )
+        self.agg.apply_event(
+            _ev(t=self.clock(), slice_id="slice-8", cost=0.05), sprint_id="sp2"
+        )
+        sp1 = self.agg.per_sprint["sp1"]
+        sp2 = self.agg.per_sprint["sp2"]
+        self.assertAlmostEqual(sp1.cost_usd, 0.30)
+        self.assertEqual(sp1.turns, 2)
+        self.assertAlmostEqual(sp2.cost_usd, 0.05)
+
+    def test_ctx_pct_is_latest_not_summed(self) -> None:
+        self.agg.apply_event(_ev(t=self.clock(), ctx_pct=20))
+        self.agg.apply_event(_ev(t=self.clock(), ctx_pct=73))
+        self.assertEqual(self.agg.per_slice["slice-1"].ctx_pct, 73)
+
+    def test_missing_slice_id_drops_event(self) -> None:
+        bad = {"t": self.clock().isoformat(), "cost_usd": 0.10}
+        self.assertIsNone(self.agg.apply_event(bad))
+        self.assertAlmostEqual(self.agg.project.lifetime_cost, 0.0)
+
+
+class MetricTickPayloadShapeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.clock = _FrozenClock(datetime(2026, 5, 20, 14, 0, tzinfo=UTC))
+        self.agg = Aggregator(now_fn=self.clock)
+
+    def test_payload_carries_slice_sprint_delta_rollups(self) -> None:
+        ev = _ev(t=self.clock(), slice_id="slice-4", cost=0.41)
+        payload = self.agg.apply_event(ev, sprint_id="sp1")
+        assert payload is not None
+        self.assertIsInstance(payload, MetricTickPayload)
+        self.assertEqual(payload.slice_id, "slice-4")
+        self.assertEqual(payload.sprint_id, "sp1")
+        # The raw event flows through verbatim under ``delta``.
+        self.assertEqual(payload.delta["cost_usd"], 0.41)
+        # The rollups dict matches the slice-12 spec contract.
+        r = payload.rollups
+        for key in (
+            "slice_cost",
+            "slice_tokens_in",
+            "slice_ctx_pct",
+            "sprint_cost",
+            "sprint_tokens",
+            "project_today",
+            "project_week",
+            "project_30d",
+            "project_lifetime",
+            "project_lifetime_tokens",
+        ):
+            self.assertIn(key, r)
+        self.assertAlmostEqual(r["slice_cost"], 0.41)
+        self.assertAlmostEqual(r["project_today"], 0.41)
+
+    def test_on_event_callback_fires(self) -> None:
+        received: list[MetricTickPayload] = []
+        agg = Aggregator(now_fn=self.clock, on_event=received.append)
+        agg.apply_event(_ev(t=self.clock(), cost=0.10))
+        agg.apply_event(_ev(t=self.clock(), cost=0.20))
+        self.assertEqual(len(received), 2)
+        self.assertAlmostEqual(received[1].rollups["project_lifetime"], 0.30)
+
+    def test_callback_exception_does_not_kill_apply(self) -> None:
+        def boom(_payload: MetricTickPayload) -> None:
+            raise RuntimeError("downstream subscriber blew up")
+
+        agg = Aggregator(now_fn=self.clock, on_event=boom)
+        # apply_event must still update aggregates even when the subscriber dies.
+        agg.apply_event(_ev(t=self.clock(), cost=0.10))
+        self.assertAlmostEqual(agg.project.lifetime_cost, 0.10)
+
+
+class ReplayTests(unittest.TestCase):
+    """Cold-start replay: lifetime totals from incremental apply must equal
+    the totals from replay-from-scratch over the same JSONL."""
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="naml-agg-")).resolve()
+        self.clock = _FrozenClock(datetime(2026, 5, 20, 14, 0, tzinfo=UTC))
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _write_jsonl(self, path: Path, events: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            for ev in events:
+                f.write(json.dumps(ev) + "\n")
+
+    def test_replay_matches_incremental(self) -> None:
+        events = [
+            _ev(t=self.clock() - timedelta(days=5), cost=0.10, turn=1),
+            _ev(t=self.clock() - timedelta(days=2), cost=0.30, turn=2),
+            _ev(t=self.clock(), cost=0.25, turn=3),
+        ]
+        path = self._tmp / "slice-4.tokens.jsonl"
+        self._write_jsonl(path, events)
+
+        incremental = Aggregator(now_fn=self.clock)
+        for ev in events:
+            incremental.apply_event(ev, sprint_id="sp1")
+
+        replayed = Aggregator(now_fn=self.clock)
+        applied = replayed.replay_jsonl(path, sprint_id="sp1")
+        self.assertEqual(applied, 3)
+        self.assertEqual(incremental.snapshot(), replayed.snapshot())
+
+    def test_replay_tolerates_malformed_line(self) -> None:
+        path = self._tmp / "slice-1.tokens.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            f.write(json.dumps(_ev(t=self.clock(), cost=0.10)) + "\n")
+            f.write("not even json\n")
+            f.write(json.dumps(_ev(t=self.clock(), cost=0.20)) + "\n")
+
+        agg = Aggregator(now_fn=self.clock)
+        applied = agg.replay_jsonl(path)
+        self.assertEqual(applied, 2)
+        self.assertAlmostEqual(agg.project.lifetime_cost, 0.30)
+
+    def test_replay_missing_file_returns_zero(self) -> None:
+        agg = Aggregator(now_fn=self.clock)
+        self.assertEqual(agg.replay_jsonl(self._tmp / "absent.jsonl"), 0)
+
+
+class ProjectViewSnapshotAndResetTests(unittest.TestCase):
+    """Slice-12 reset semantics. Slice-10's ``ResetTests`` exercises the
+    legacy nested-shape behaviour; this class confirms the ``project``
+    flat-field view zeroes out on reset too."""
+
+    def setUp(self) -> None:
+        self.clock = _FrozenClock(datetime(2026, 5, 20, 14, 0, tzinfo=UTC))
+        self.agg = Aggregator(now_fn=self.clock)
+        self.agg.apply_event(
+            _ev(t=self.clock(), slice_id="slice-1", cost=0.10), sprint_id="sp1"
+        )
+
+    def test_snapshot_shape(self) -> None:
+        snap = self.agg.snapshot()
+        self.assertIn("per_slice", snap)
+        self.assertIn("per_sprint", snap)
+        self.assertIn("per_project", snap)
+        self.assertIn("slice-1", snap["per_slice"])
+        self.assertIn("sp1", snap["per_sprint"])
+        self.assertEqual(snap["per_slice"]["slice-1"]["sprint_id"], "sp1")
+
+    def test_reset_clears_everything(self) -> None:
+        self.agg.reset()
+        self.assertEqual(self.agg.snapshot()["per_slice"], {})
+        self.assertEqual(self.agg.snapshot()["per_sprint"], {})
+        self.assertAlmostEqual(self.agg.project.lifetime_cost, 0.0)
 
 
 if __name__ == "__main__":
