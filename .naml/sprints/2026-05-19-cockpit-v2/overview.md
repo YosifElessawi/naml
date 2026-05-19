@@ -30,6 +30,16 @@ pre-grilled (Q1–Q10 captured in `artifacts/spec.md`) and pre-mocked
 
 ## Non-obvious constraints
 
+- **Self-host run: do not restart the orchestrator mid-sprint.** This
+  sprint modifies several files that naml's own runtime imports
+  (`naml/lane.py`, `naml/state.py`, `naml/states.py`, `naml/cli.py`,
+  `naml/server.py`, removal of `naml/web.py`). Slice changes live in
+  per-slice worktrees until merge; once merged, the running orchestrator
+  process keeps using the modules it loaded at startup. If you Ctrl-C
+  and re-run `naml run` mid-sprint, the next round will pick up
+  partially-merged self-modifications and could break the orchestrator
+  on the spot. If a hard restart is unavoidable, abandon the sprint and
+  open the remaining slices manually.
 - **Lanes own Claude sessions.** "Open in terminal" from the slice drawer
   would interrupt an in-flight session. The button is **gated** by slice
   state: locked in `setup · work · pr`; unlocked in
