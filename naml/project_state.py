@@ -182,3 +182,161 @@ def save_project_state(naml_dir: Path, state: ProjectState) -> None:
         project_state_path(naml_dir),
         json.dumps(state.to_dict(), indent=2) + "\n",
     )
+
+
+# --- transition helpers ------------------------------------------------
+#
+# The orchestrator calls these at well-defined points. Each helper is
+# idempotent in the no-op case: if the project is already in the right
+# state for a given event, no extra transition row is appended.
+
+
+def naml_dir_for(cfg: Any) -> Path:
+    """Resolve ``<repo_root>/.naml`` for a loaded ``NamlConfig``.
+
+    Project state lives at a fixed path regardless of where the user has
+    customised ``sprints_dir`` — it's the project-level layer, not part of
+    any particular sprints layout.
+    """
+    return Path(cfg.repo_root) / ".naml"
+
+
+def on_sprint_start(naml_dir: Path, sprint_id: str) -> ProjectState:
+    """``naml run`` is about to begin work on ``sprint_id``.
+
+    Bumps the ``sprints_started`` counter only when this is a fresh sprint
+    (not a resumed one). Transitions to ``active`` unless already active
+    for the same sprint, in which case nothing is appended.
+    """
+    state = load_project_state(naml_dir)
+
+    is_new_sprint = state.current_sprint != sprint_id
+    if is_new_sprint:
+        state.metrics.sprints_started += 1
+        state.current_sprint = sprint_id
+
+    if state.state != ACTIVE:
+        state.state = ACTIVE
+        state.record_transition(
+            state=ACTIVE,
+            detail=f"sprint {sprint_id} started",
+        )
+
+    save_project_state(naml_dir, state)
+    return state
+
+
+def on_sprint_run_finished(
+    naml_dir: Path,
+    sprint_id: str,
+    *,
+    aggregate_state: str,
+) -> ProjectState:
+    """``naml run`` returned. Flip to ``awaiting_human`` on partial/full
+    failure; otherwise stay ``active`` (the sprint is mid-pipeline,
+    waiting for the merge phase)."""
+    state = load_project_state(naml_dir)
+
+    if aggregate_state in {"failed", "partial_failure"}:
+        if state.state != AWAITING_HUMAN:
+            state.state = AWAITING_HUMAN
+            state.record_transition(
+                state=AWAITING_HUMAN,
+                detail=f"sprint {sprint_id} finished run with {aggregate_state}",
+            )
+
+    save_project_state(naml_dir, state)
+    return state
+
+
+def on_sprint_merge_finished(
+    naml_dir: Path,
+    sprint_id: str,
+    *,
+    sprint_state: str,
+    merged_count: int,
+    blocked_count: int,
+) -> ProjectState:
+    """``naml merge`` returned. Roll metrics + transition based on the
+    sprint-level outcome."""
+    state = load_project_state(naml_dir)
+
+    state.metrics.slices_merged += max(merged_count, 0)
+    state.metrics.slices_blocked += max(blocked_count, 0)
+
+    if sprint_state == "complete":
+        state.metrics.sprints_completed += 1
+        state.current_sprint = ""
+        if state.state != IDLE:
+            state.state = IDLE
+            state.record_transition(
+                state=IDLE,
+                detail=f"sprint {sprint_id} complete",
+            )
+    elif sprint_state in {"merge_blocked", "partial_failure", "failed"}:
+        if sprint_state == "failed":
+            state.metrics.sprints_failed += 1
+        if state.state != AWAITING_HUMAN:
+            state.state = AWAITING_HUMAN
+            state.record_transition(
+                state=AWAITING_HUMAN,
+                detail=f"sprint {sprint_id} finished merge with {sprint_state}",
+            )
+
+    save_project_state(naml_dir, state)
+    return state
+
+
+# --- hierarchy view ---------------------------------------------------
+#
+# Composes project + sprint + slice state into a single nested dict for
+# both ``naml status`` and the (Phase 5 C5.3) ``/api/state`` endpoint.
+
+
+def build_hierarchy(cfg: Any) -> dict[str, Any]:
+    """Return the full nested {project, current_sprint, lanes} payload.
+
+    Reads from disk on every call — cheap (a handful of small JSON files)
+    and avoids any cache invalidation surface. Tolerates absent state
+    files so dashboards work from the very first invocation.
+    """
+    # Local imports keep project_state importable in test environments
+    # that don't have the full runtime wired up.
+    from . import state as state_mod
+
+    naml = naml_dir_for(cfg)
+    project = load_project_state(naml)
+    payload: dict[str, Any] = {
+        "project": project.to_dict(),
+        "current_sprint": None,
+        "lanes": [],
+    }
+
+    sprint_id = project.current_sprint
+    if not sprint_id:
+        return payload
+
+    sprint_root = Path(cfg.sprints_path) / sprint_id
+    sprint_state = state_mod.load_sprint_state(sprint_root)
+    if sprint_state is None:
+        return payload
+
+    payload["current_sprint"] = {
+        "sprint_id": sprint_state.sprint_id,
+        "state": sprint_state.state,
+        "lanes_configured": sprint_state.lanes_configured,
+        "lanes_effective": sprint_state.lanes_effective,
+        "slices": [],
+        "transitions": [t.to_dict() for t in sprint_state.transitions],
+    }
+
+    slices_payload: list[dict[str, Any]] = []
+    for slice_id, _state_label in sprint_state.slices.items():
+        status = state_mod.load_slice_status(sprint_root, slice_id)
+        if status is None:
+            slices_payload.append({"slice_id": slice_id, "state": "pending"})
+            continue
+        slices_payload.append(status.to_dict())
+    payload["current_sprint"]["slices"] = slices_payload
+
+    return payload

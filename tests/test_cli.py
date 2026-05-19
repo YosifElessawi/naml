@@ -101,6 +101,34 @@ class ShowConfigTests(_TempMixin, unittest.TestCase):
         self.assertIn("no naml config", err)
 
 
+class StatusTests(_TempMixin, unittest.TestCase):
+    def _seed_config(self) -> Path:
+        target = self._tmp / NEW_CONFIG_RELPATH
+        target.parent.mkdir(parents=True)
+        target.write_text((FIXTURES / "naml_config.toml").read_text())
+        return target
+
+    def test_status_with_no_state_returns_idle(self) -> None:
+        self._seed_config()
+        rc, out, err = _run("status", "--root", str(self._tmp))
+        self.assertEqual(rc, 0, msg=err)
+        payload = json.loads(out)
+        self.assertEqual(payload["project"]["state"], "idle")
+        self.assertIsNone(payload["current_sprint"])
+
+    def test_status_reflects_active_project(self) -> None:
+        self._seed_config()
+        # Simulate an in-flight sprint by writing project state directly.
+        from naml import project_state as ps
+        ps.on_sprint_start(self._tmp / ".naml", "sprint-A")
+
+        rc, out, err = _run("status", "--root", str(self._tmp))
+        self.assertEqual(rc, 0, msg=err)
+        payload = json.loads(out)
+        self.assertEqual(payload["project"]["state"], "active")
+        self.assertEqual(payload["project"]["current_sprint"], "sprint-A")
+
+
 class InspectSprintTests(_TempMixin, unittest.TestCase):
     def test_inspects_valid_sprint(self) -> None:
         path = _build_sprint(self._tmp)

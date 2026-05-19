@@ -27,6 +27,7 @@ from typing import Iterable
 from .config import NamlConfig
 from . import lane as lane_mod
 from .package import Sprint
+from . import project_state as project_state_mod
 from .scheduler import (
     OverlapPolicy,
     ScheduleError,
@@ -136,6 +137,9 @@ def run_sprint(
             cfg.repo, sprint.target_repo,
         )
 
+    project_naml = project_state_mod.naml_dir_for(cfg)
+    project_state_mod.on_sprint_start(project_naml, sprint.id)
+
     scheduler = Scheduler(sprint, overlap_policy=overlap_policy)
     scheduler.preflight()  # may raise ScheduleError under "abort"
 
@@ -232,6 +236,10 @@ def run_sprint(
         )
     sprint_state.slices = per_slice
     state_mod.save_sprint_state(sprint_root, sprint_state)
+
+    project_state_mod.on_sprint_run_finished(
+        project_naml, sprint.id, aggregate_state=aggregate
+    )
 
     return RunReport(
         sprint_id=sprint.id,
