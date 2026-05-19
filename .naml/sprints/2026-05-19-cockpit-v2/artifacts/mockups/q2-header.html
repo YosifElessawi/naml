@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q2 — Header · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    /* ── full-scale header previews ── */
+    .hdr {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      height: 48px;
+      padding: 0 14px;
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-1);
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .hdr .logo {
+      font-family: var(--mono);
+      color: var(--c-accent);
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+    }
+    .hdr .sync {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      color: var(--text-2);
+    }
+    .hdr .sync .ddot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--c-accent-2);
+      box-shadow: 0 0 8px var(--c-accent-2);
+    }
+    .hdr .div { width: 1px; height: 22px; background: var(--border-soft); }
+    .hdr .switcher {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 10px;
+      background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px;
+      font-family: var(--mono); font-size: 11px;
+      cursor: pointer;
+    }
+    .hdr .switcher:hover { border-color: var(--c-accent); }
+    .hdr .sprint-pin {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 10px;
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.3);
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-0);
+    }
+    .hdr .sprint-pin .play {
+      width: 0; height: 0;
+      border-left: 6px solid var(--c-accent);
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+    }
+    .hdr .sprint-pin .prog {
+      width: 60px; height: 4px;
+      background: var(--bg-3); border-radius: 2px; overflow: hidden;
+      position: relative;
+    }
+    .hdr .sprint-pin .prog::after {
+      content: '';
+      position: absolute; inset: 0;
+      width: 62%;
+      background: linear-gradient(90deg, var(--c-accent), var(--c-accent-2));
+      border-radius: 2px;
+    }
+    .hdr .grow { flex: 1; }
+    .hdr .tabs {
+      display: inline-flex;
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 7px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .hdr .tabs .tab {
+      padding: 5px 12px;
+      border-radius: 5px;
+      font-size: 11.5px;
+      color: var(--text-2);
+      cursor: pointer;
+    }
+    .hdr .tabs .tab.active { background: var(--bg-3); color: var(--text-0); }
+    .hdr .iconbtn {
+      width: 30px; height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-2); border: 1px solid var(--border-soft); border-radius: 6px;
+      color: var(--text-2);
+      font-size: 13px;
+      cursor: pointer;
+      position: relative;
+    }
+    .hdr .iconbtn:hover { color: var(--text-0); border-color: var(--c-accent); }
+    .hdr .iconbtn .ndot {
+      position: absolute; top: 4px; right: 4px;
+      width: 6px; height: 6px;
+      background: var(--c-warn); border-radius: 50%;
+      box-shadow: 0 0 5px var(--c-warn);
+    }
+    .hdr .acct {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 8px 4px 4px;
+      background: var(--bg-2); border: 1px solid var(--border-soft); border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .hdr .acct .av {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: linear-gradient(135deg, #38bdf8, #a78bfa);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 10px; color: #fff; font-weight: 700;
+    }
+    .hdr .actbtn {
+      padding: 7px 12px; border-radius: 6px;
+      font-family: var(--mono); font-size: 11px; letter-spacing: 0.05em;
+      cursor: pointer; border: 1px solid transparent;
+    }
+    .hdr .actbtn.run {
+      background: var(--c-accent); color: #052735; border-color: var(--c-accent);
+      font-weight: 700;
+    }
+    .hdr .actbtn.merge {
+      background: rgba(251,191,36,0.12); color: var(--c-warn); border-color: rgba(251,191,36,0.4);
+      font-weight: 700;
+    }
+    .hdr .actbtn.ghost {
+      background: transparent; color: var(--text-1); border-color: var(--border);
+    }
+    .hdr .crumbs {
+      font-family: var(--mono); font-size: 10.5px; color: var(--text-2);
+      display: inline-flex; gap: 6px; align-items: center;
+    }
+    .hdr .crumbs .crumb { color: var(--text-1); }
+    .hdr .crumbs .crumb.active { color: var(--text-0); }
+    .hdr .crumbs .sep { color: var(--text-3); }
+
+    /* row-2 contextual bar */
+    .hdr2 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 38px;
+      padding: 0 14px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 11.5px; color: var(--text-2);
+    }
+    .hdr2 .seg {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 11px;
+    }
+    .hdr2 .seg b { color: var(--text-0); font-weight: 600; }
+
+    /* stage mini under each header */
+    .stage {
+      background: var(--bg-0);
+      padding: 14px;
+      display: flex; flex-direction: column; gap: 8px;
+      min-height: 100px;
+    }
+    .stage .row {
+      height: 22px; background: var(--bg-2);
+      border: 1px solid var(--border-soft); border-radius: 4px;
+    }
+    .stage .row.tall { height: 40px; }
+
+    .option-preview { padding: 0; min-height: 0; }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 02 / Header</div>
+      <h1>What gets pinned to the top of every view?</h1>
+      <div class="qsub">
+        The header is the only persistent action surface. It has to carry identity, sync health, project + sprint context, navigation, and (maybe) the two big buttons. Trade-off: how much do you want to do from anywhere vs. how clean does it stay?
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all questions</a>
+      <a href="q1-shell.html">← Q1</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — slim single-row header.</strong>
+      Identity + sync + project switcher + active-sprint pill (with mini progress bar) + route tabs + notifications + account + gear. <em>Run Sprint / Merge Sprint stay on the Sprint view, not the header</em> — they're context-sensitive, only meaningful when you're already there. A header that's always actionable is also always loud; a header that just navigates stays calm.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── Option A: Slim single-row (RECOMMENDED) ─────────── -->
+    <article class="option recommended">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Slim single-row · navigation + context only</h2>
+      </div>
+      <div class="option-preview">
+        <div class="hdr">
+          <span class="logo">▟ naml</span>
+          <span class="sync"><span class="ddot pulse"></span>Synced 2s</span>
+          <span class="div"></span>
+          <span class="switcher">inpolicy/web <span style="color: var(--text-3)">▾</span></span>
+          <span class="sprint-pin">
+            <span class="play"></span>
+            2026-05-19-html-renderer
+            <span class="prog"></span>
+            <span style="color: var(--text-2)">5/8</span>
+          </span>
+          <span class="grow"></span>
+          <span class="tabs">
+            <span class="tab">Dashboard</span>
+            <span class="tab active">Sprint</span>
+            <span class="tab">Settings</span>
+          </span>
+          <span class="iconbtn">🔔<span class="ndot"></span></span>
+          <span class="acct"><span class="av">YE</span>personal</span>
+          <span class="iconbtn">⚙</span>
+        </div>
+        <div class="stage">
+          <div class="row tall"></div>
+          <div class="row"></div>
+          <div class="row"></div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Active sprint lives as a clickable pill with a live progress bar (<code>5/8</code> slices done). Notifications bell flags <code>needs_human_review</code> / failed slices. Account chip handles multi-config (<code>CLAUDE_CONFIG_DIR</code>). The two big buttons stay on the Sprint view — header reserved for identity + navigation + status.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Calm even mid-run</li>
+              <li>Sprint pill = one-click jump-in</li>
+              <li>Progress visible from any view</li>
+              <li>Notifications never miss escalations</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Run/Merge requires being on Sprint view</li>
+              <li>Slightly more chrome density</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option B: Action-rich ─────────── -->
+    <article class="option">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Action-rich · Run / Merge buttons in header</h2>
+      </div>
+      <div class="option-preview">
+        <div class="hdr">
+          <span class="logo">▟ naml</span>
+          <span class="sync"><span class="ddot pulse"></span>2s</span>
+          <span class="switcher">inpolicy/web ▾</span>
+          <span class="sprint-pin">2026-05-19-html-renderer<span class="prog"></span></span>
+          <span class="grow"></span>
+          <span class="actbtn merge">▶ MERGE SPRINT</span>
+          <span class="actbtn ghost">DASH</span>
+          <span class="actbtn ghost">SPRINT</span>
+          <span class="iconbtn">🔔<span class="ndot"></span></span>
+          <span class="iconbtn">⚙</span>
+        </div>
+        <div class="stage">
+          <div class="row tall"></div>
+          <div class="row"></div>
+          <div class="row"></div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Run Sprint or Merge Sprint sit as a contextual primary button in the header — visible from any view. Color flips by sprint state: blue when ready to run, amber when <code>awaiting_signoff</code>. Settings gear and account fold into the bell + gear icons.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>One-click action from anywhere</li>
+              <li>Sprint state radiates through header color</li>
+              <li>Feels active, decisive</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Header gets loud during a run</li>
+              <li>Easy to mis-click Merge from Settings</li>
+              <li>State color overloads the chrome</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option C: Two-row ─────────── -->
+    <article class="option">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Two-row · identity above, context below</h2>
+      </div>
+      <div class="option-preview">
+        <div class="hdr">
+          <span class="logo">▟ naml</span>
+          <span class="sync"><span class="ddot pulse"></span>Synced 2s</span>
+          <span class="switcher">inpolicy/web ▾</span>
+          <span class="grow"></span>
+          <span class="tabs">
+            <span class="tab">Dashboard</span>
+            <span class="tab active">Sprint</span>
+            <span class="tab">Settings</span>
+          </span>
+          <span class="iconbtn">🔔<span class="ndot"></span></span>
+          <span class="acct"><span class="av">YE</span>personal</span>
+        </div>
+        <div class="hdr2">
+          <span class="crumbs">
+            <span class="crumb">Sprints</span>
+            <span class="sep">/</span>
+            <span class="crumb active">2026-05-19-html-renderer</span>
+          </span>
+          <span class="grow"></span>
+          <span class="seg">slices <b>5/8</b></span>
+          <span class="seg">state <b style="color: var(--c-work)">executing</b></span>
+          <span class="seg">elapsed <b>21m</b></span>
+          <span class="seg">cost <b>$2.41</b></span>
+        </div>
+        <div class="stage">
+          <div class="row tall"></div>
+          <div class="row"></div>
+          <div class="row"></div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Top row = identity + nav, never changes. Bottom row = per-route context strip: breadcrumb + a few key metrics for the current view. On Dashboard it might show project rollups; on Sprint it shows live sprint metrics; on Settings it's empty.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Tons of context without crowding</li>
+              <li>Crumbs feel natural for nested nav</li>
+              <li>Per-view metrics in peripheral vision</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>~86px stolen from main pane (twice)</li>
+              <li>Duplicates right-rail telemetry</li>
+              <li>Feels like a Jira / Atlassian header</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a header direction.</strong> Reply with <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      Two micro-decisions inside whichever you pick:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Active-sprint pill behaviour</strong> — clicking jumps to Sprint view; right-click for menu (pause / pin a different sprint). OK?</li>
+        <li><strong>Notifications bell scope</strong> — only escalations (<code>needs_human_review</code>, <code>failed</code>, <code>merge_blocked</code>), or also "ship-ready" celebrations (sprint reached <code>awaiting_signoff</code>)?</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

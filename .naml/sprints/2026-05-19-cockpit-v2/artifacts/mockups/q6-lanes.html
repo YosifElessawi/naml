@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q6 — Lane layout · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .canvas {
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* ───────── (A) Vertical kanban columns ───────── */
+    .lanes-v {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .lane-col {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 10px;
+      min-height: 380px;
+    }
+    .lane-col.busy { border-color: rgba(56,189,248,0.3); }
+    .lane-col.idle { border-color: var(--border-soft); }
+    .lane-col.error { border-color: rgba(248,113,113,0.3); }
+
+    .lane-hd {
+      display: flex; align-items: center; gap: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .lane-hd .ln {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-0);
+      font-weight: 600;
+    }
+    .lane-hd .lst {
+      font-family: var(--mono); font-size: 9.5px;
+      letter-spacing: 0.1em;
+      padding: 2px 7px; border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .lst.busy { background: rgba(56,189,248,0.12); color: var(--c-accent); }
+    .lst.busy .dt { width: 6px; height: 6px; background: var(--c-accent); border-radius: 50%; box-shadow: 0 0 5px var(--c-accent); animation: pulse 2s ease-in-out infinite; }
+    .lst.idle { background: var(--bg-3); color: var(--text-2); }
+    .lst.idle .dt { width: 6px; height: 6px; background: var(--text-3); border-radius: 50%; }
+    .lane-hd .lwt {
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      margin-left: auto;
+    }
+
+    /* mini slice card inside lane (compact version of Q5's A) */
+    .lcard {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .lcard::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    }
+    .lcard.work::before { background: var(--c-work); }
+    .lcard.review::before { background: var(--c-review); }
+    .lcard.merged::before { background: var(--c-merged); }
+
+    .lcard .lt {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .lcard .lt .lid {
+      font-family: var(--mono); font-size: 9.5px;
+      background: rgba(56,189,248,0.1); color: var(--c-accent);
+      padding: 1px 5px; border-radius: 3px;
+    }
+    .lcard .lt .ltt {
+      font-size: 11px; color: var(--text-0);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      flex: 1;
+    }
+    .lcard .lt .lpill {
+      font-family: var(--mono); font-size: 8.5px;
+      padding: 1px 5px; border-radius: 3px;
+      letter-spacing: 0.08em;
+    }
+    .lpill.work { background: rgba(56,189,248,0.15); color: var(--c-work); }
+    .lpill.review { background: rgba(251,191,36,0.15); color: var(--c-review); }
+    .lpill.merged { background: rgba(52,211,153,0.15); color: var(--c-merged); }
+
+    .lcard .lmeters {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .lcard .lmt {
+      font-family: var(--mono); font-size: 8.5px;
+      color: var(--text-3); letter-spacing: 0.08em;
+    }
+    .lcard .lmv {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-0); font-weight: 600;
+    }
+    .lcard .lmv.warn { color: var(--c-warn); }
+    .lcard .lbar {
+      height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden;
+      position: relative; margin-top: 2px;
+    }
+    .lcard .lbar .lf { position: absolute; inset: 0; border-radius: 2px; }
+    .lcard .lbar .lf.work { background: var(--c-work); }
+    .lcard .lbar .lf.warn { background: var(--c-warn); }
+    .lcard .lstats {
+      display: flex; gap: 8px;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-2);
+    }
+    .lcard .lstats b { color: var(--text-0); }
+
+    .empty-slot {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-3);
+      letter-spacing: 0.08em;
+      background: var(--bg-1);
+    }
+
+    .lane-foot {
+      padding-top: 8px;
+      border-top: 1px solid var(--border-soft);
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      display: flex; justify-content: space-between;
+    }
+    .lane-foot b { color: var(--text-1); }
+
+    .queue-strip {
+      background: var(--bg-1);
+      border: 1px dashed var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+    }
+    .queue-strip .qlabel {
+      color: var(--text-3); letter-spacing: 0.12em;
+    }
+    .queue-strip .qchip {
+      display: inline-flex; gap: 4px; align-items: center;
+      padding: 3px 8px; background: var(--bg-2);
+      border: 1px solid var(--border-soft); border-radius: 5px;
+      color: var(--text-1);
+    }
+    .queue-strip .qchip .id { color: var(--c-accent); }
+
+    /* ───────── (B) Horizontal gantt swimlanes ───────── */
+    .gantt {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .gantt .gtime {
+      display: flex; justify-content: space-between;
+      padding: 0 8px 6px 64px;
+      border-bottom: 1px solid var(--border-soft);
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+    .glane {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .glane:last-child { border-bottom: none; }
+    .glane .glbl {
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-1);
+    }
+    .glane .gtrack {
+      position: relative;
+      height: 28px;
+      background: var(--bg-2);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .gblock {
+      position: absolute;
+      top: 0; bottom: 0;
+      padding: 4px 8px;
+      display: flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 10px;
+      color: #fff;
+      border-radius: 4px;
+    }
+    .gblock.work { background: rgba(56,189,248,0.6); border: 1px solid var(--c-work); }
+    .gblock.review { background: rgba(251,191,36,0.5); border: 1px solid var(--c-review); }
+    .gblock.merged { background: rgba(52,211,153,0.4); border: 1px solid var(--c-merged); }
+    .gblock .gid { color: #fff; font-weight: 600; }
+    .gblock .gnow {
+      width: 0; height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 4px solid var(--c-accent);
+      position: absolute;
+      right: -1px;
+      top: 50%; transform: translateY(-50%);
+    }
+    .gnow-line {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: var(--c-accent);
+      box-shadow: 0 0 6px var(--c-accent);
+    }
+
+    /* ───────── (C) Flat list with lane chip ───────── */
+    .flat {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .frow {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: 50px auto 1fr auto auto auto;
+      gap: 10px;
+      align-items: center;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-1);
+    }
+    .frow .lchip {
+      padding: 2px 7px; border-radius: 4px;
+      font-size: 9.5px; letter-spacing: 0.08em;
+    }
+    .lchip.l1 { background: rgba(56,189,248,0.12); color: var(--c-accent); }
+    .lchip.l2 { background: rgba(167,139,250,0.15); color: #c4b5fd; }
+    .lchip.l3 { background: rgba(52,211,153,0.12); color: var(--c-accent-2); }
+    .lchip.lq { background: var(--bg-3); color: var(--text-2); }
+    .frow .sid { color: var(--c-accent); font-size: 10px; }
+    .frow .ttl { color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .frow b { color: var(--text-0); }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 06 / Lane layout</div>
+      <h1>How are the lanes spatially arranged?</h1>
+      <div class="qsub">
+        With <code>parallel_lanes = 3</code> by default, every running slice is assigned to one of three workers (each with its own git worktree + Claude session). The question: does the screen organize work <em>by lane</em>, <em>by time</em>, or <em>by slice</em>?
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q5-slice-card.html">← Q5</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — vertical kanban columns, one per lane.</strong>
+      Three side-by-side columns, each carrying its lane's currently-active slice card + recently-completed slice underneath + a "waiting for next" empty slot when idle. Lane utilization is visible at a glance — if a column is idle while the queue strip below shows pending slices, you instantly see "we have unused capacity, why?". Matches the V2 design-doc's "vertical lane layout" directive 1:1.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ───────── Option A: vertical kanban columns ───────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Vertical kanban columns · one column per lane</h2>
+      </div>
+      <div class="option-preview">
+        <div class="canvas">
+          <div class="lanes-v">
+
+            <!-- lane 1 (busy) -->
+            <div class="lane-col busy">
+              <div class="lane-hd">
+                <span class="ln">lane-1</span>
+                <span class="lst busy"><span class="dt"></span>BUSY</span>
+                <span class="lwt">~/wt/lane-1</span>
+              </div>
+              <div class="lcard review">
+                <div class="lt">
+                  <span class="lid">slice-3</span>
+                  <span class="ltt">Render config schema validator</span>
+                  <span class="lpill review">REVIEW</span>
+                </div>
+                <div class="lmeters">
+                  <div>
+                    <div class="lmt">DUR</div>
+                    <div class="lmv">1m48s</div>
+                    <div class="lbar"><div class="lf warn" style="width: 30%;"></div></div>
+                  </div>
+                  <div>
+                    <div class="lmt">CTX</div>
+                    <div class="lmv">41%</div>
+                    <div class="lbar"><div class="lf work" style="width: 41%;"></div></div>
+                  </div>
+                </div>
+                <div class="lstats">
+                  <span>$<b>0.28</b></span>
+                  <span>PR <b style="color: var(--c-accent)">#142</b></span>
+                </div>
+              </div>
+              <div class="lane-foot">
+                <span>this sprint: <b>2 done · 1 active</b></span>
+                <span style="color: var(--c-accent)">RESUME ↗</span>
+              </div>
+            </div>
+
+            <!-- lane 2 (busy) -->
+            <div class="lane-col busy">
+              <div class="lane-hd">
+                <span class="ln">lane-2</span>
+                <span class="lst busy"><span class="dt"></span>BUSY</span>
+                <span class="lwt">~/wt/lane-2</span>
+              </div>
+              <div class="lcard work">
+                <div class="lt">
+                  <span class="lid">slice-4</span>
+                  <span class="ltt">HTML renderer w/ mock-target snapshot</span>
+                  <span class="lpill work">WORK</span>
+                </div>
+                <div class="lmeters">
+                  <div>
+                    <div class="lmt">DUR</div>
+                    <div class="lmv">6m12s</div>
+                    <div class="lbar"><div class="lf work" style="width: 68%;"></div></div>
+                  </div>
+                  <div>
+                    <div class="lmt">CTX</div>
+                    <div class="lmv warn">73%</div>
+                    <div class="lbar"><div class="lf warn" style="width: 73%;"></div></div>
+                  </div>
+                </div>
+                <div class="lstats">
+                  <span>$<b>0.41</b></span>
+                  <span>retry <b style="color: var(--c-warn)">1/2</b></span>
+                </div>
+              </div>
+              <div class="lane-foot">
+                <span>this sprint: <b>1 done · 1 active</b></span>
+                <span style="color: var(--c-accent)">RESUME ↗</span>
+              </div>
+            </div>
+
+            <!-- lane 3 (idle, ready for next) -->
+            <div class="lane-col idle">
+              <div class="lane-hd">
+                <span class="ln">lane-3</span>
+                <span class="lst idle"><span class="dt"></span>IDLE</span>
+                <span class="lwt">~/wt/lane-3</span>
+              </div>
+              <div class="lcard merged">
+                <div class="lt">
+                  <span class="lid">slice-2</span>
+                  <span class="ltt">Config schema + golden tests</span>
+                  <span class="lpill merged">MERGED ✓</span>
+                </div>
+                <div class="lstats">
+                  <span>$<b>0.74</b></span>
+                  <span>11m42s</span>
+                  <span>PR <b style="color: var(--text-2)">#141 ✓</b></span>
+                </div>
+              </div>
+              <div class="empty-slot">
+                READY · NEXT SLICE WILL LAND HERE
+              </div>
+              <div class="lane-foot">
+                <span>this sprint: <b>2 done</b></span>
+                <span style="color: var(--text-3)">no work assigned</span>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="queue-strip">
+            <span class="qlabel">QUEUE</span>
+            <span class="qchip"><span class="id">slice-5</span>blocked on slice-4</span>
+            <span class="qchip"><span class="id">slice-6</span>ready</span>
+            <span class="qchip"><span class="id">slice-7</span>ready</span>
+            <span class="qchip"><span class="id">slice-8</span>blocked on slice-6</span>
+            <span style="flex: 1"></span>
+            <span style="color: var(--text-3)">3 lanes · 2 ready · 2 blocked</span>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Lane columns mean lane <em>utilization</em> is the visible question, not just slice progress. If two columns are busy and one is idle while ready slices are queued — you see the bottleneck (probably DAG width, not lanes). The queue strip underneath shows what's competing for the next free lane.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Lane utilization is the headline</li>
+              <li>Idle lane = visible empty slot</li>
+              <li>Queue strip shows competition for capacity</li>
+              <li>Maps 1:1 to V2 doc directive</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>~320px per column — feels tight at 3 lanes</li>
+              <li>Tough to scale visually past 6 lanes</li>
+              <li>Time ordering not implicit (need timestamps)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ───────── Option B: horizontal gantt ───────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Horizontal gantt swimlanes · time on the x-axis</h2>
+      </div>
+      <div class="option-preview">
+        <div class="canvas">
+          <div class="gantt">
+            <div class="gtime">
+              <span>14:02</span>
+              <span>14:08</span>
+              <span>14:14</span>
+              <span>14:20</span>
+              <span>14:26 (now)</span>
+            </div>
+            <div class="glane">
+              <div class="glbl">lane-1</div>
+              <div class="gtrack">
+                <div class="gblock merged" style="left: 0%; width: 28%;"><span class="gid">slice-1</span></div>
+                <div class="gblock review" style="left: 28%; width: 30%;"><span class="gid">slice-3</span></div>
+                <div class="gnow-line" style="left: 88%;"></div>
+              </div>
+            </div>
+            <div class="glane">
+              <div class="glbl">lane-2</div>
+              <div class="gtrack">
+                <div class="gblock merged" style="left: 2%; width: 24%;"><span class="gid">slice-0</span></div>
+                <div class="gblock work" style="left: 26%; width: 62%;"><span class="gid">slice-4 (active)</span><span class="gnow"></span></div>
+                <div class="gnow-line" style="left: 88%;"></div>
+              </div>
+            </div>
+            <div class="glane">
+              <div class="glbl">lane-3</div>
+              <div class="gtrack">
+                <div class="gblock merged" style="left: 0%; width: 50%;"><span class="gid">slice-2</span></div>
+                <div class="gnow-line" style="left: 88%;"></div>
+              </div>
+            </div>
+          </div>
+          <div class="queue-strip">
+            <span class="qlabel">QUEUE</span>
+            <span class="qchip"><span class="id">slice-5</span>blocked on slice-4</span>
+            <span class="qchip"><span class="id">slice-6</span>ready</span>
+            <span class="qchip"><span class="id">slice-7</span>ready</span>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Time on x-axis, lanes as horizontal swimlanes. Block widths show slice duration; "now" line is the cyan vertical bar. Best for understanding <em>when</em> things happened and how long each took. Looks like a build pipeline / Gantt chart.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Time ordering instantly readable</li>
+              <li>Slice duration is visual (block width)</li>
+              <li>Lane idle gaps show "starved" moments</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Slice detail squeezed inside narrow blocks</li>
+              <li>Need a zoom/pan control for long sprints</li>
+              <li>Drowns out per-slice telemetry</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ───────── Option C: flat list, lane as chip ───────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Flat list · slices first, lane as a colored chip</h2>
+      </div>
+      <div class="option-preview">
+        <div class="canvas">
+          <div class="flat">
+            <div class="frow">
+              <span class="lchip l2">lane-2</span>
+              <span class="sid">slice-4</span>
+              <span class="ttl">HTML renderer with mock-target snapshot</span>
+              <span style="color: var(--c-work)">WORK</span>
+              <span>6m12s · <b>73% ctx</b></span>
+              <span style="color: var(--c-accent)">OPEN ↗</span>
+            </div>
+            <div class="frow">
+              <span class="lchip l1">lane-1</span>
+              <span class="sid">slice-3</span>
+              <span class="ttl">Render config schema validator</span>
+              <span style="color: var(--c-review)">REVIEW</span>
+              <span>1m48s · PR <b>#142</b></span>
+              <span style="color: var(--c-accent)">OPEN ↗</span>
+            </div>
+            <div class="frow">
+              <span class="lchip l3">lane-3</span>
+              <span class="sid">slice-2</span>
+              <span class="ttl">Config schema + golden tests</span>
+              <span style="color: var(--c-merged)">MERGED</span>
+              <span>11m42s · $0.74</span>
+              <span style="color: var(--text-2)">VIEW</span>
+            </div>
+            <div class="frow" style="opacity: 0.55">
+              <span class="lchip lq">queued</span>
+              <span class="sid">slice-5</span>
+              <span class="ttl">Eval harness integration</span>
+              <span style="color: var(--text-3)">BLOCKED</span>
+              <span>—</span>
+              <span style="color: var(--text-3)">waits on slice-4</span>
+            </div>
+            <div class="frow" style="opacity: 0.55">
+              <span class="lchip lq">queued</span>
+              <span class="sid">slice-6</span>
+              <span class="ttl">Auto-review subagent wiring</span>
+              <span style="color: var(--text-3)">READY</span>
+              <span>—</span>
+              <span style="color: var(--text-3)">waiting for free lane</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Slice-first. Lane assignment is a chip on the left, not a spatial axis. Most compact — fits 12+ rows on screen — but lanes lose their spatial identity. Best when you have 5+ lanes (columns would get too narrow).</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Most slices visible at once</li>
+              <li>Scales gracefully to 6+ lanes</li>
+              <li>Sortable by state / duration / cost</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Lane utilization hidden (can't see idle lanes)</li>
+              <li>Less spatial / cockpit-y</li>
+              <li>Doesn't match the V2 doc directive</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a lane layout.</strong> Reply with <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      Side decisions on A:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>What does an idle lane show?</strong> My pick: most-recent completed slice on top + dashed "READY · NEXT SLICE WILL LAND HERE" empty slot. Or fully blank with just the "READY" placeholder?</li>
+        <li><strong>Column count past 3 lanes</strong> — if user bumps <code>parallel_lanes = 6</code>, do we (a) shrink columns, (b) horizontal-scroll, or (c) auto-switch to Option C's flat list? My pick: shrink to 4, scroll past 4.</li>
+        <li><strong>Queue strip placement</strong> — below the lanes (visible always) or behind a "show queue" toggle (cleaner)? I'd keep it visible — it's the answer to "why is a lane idle?".</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

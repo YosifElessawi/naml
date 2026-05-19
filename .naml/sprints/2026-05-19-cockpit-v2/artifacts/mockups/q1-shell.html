@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q1 — Shell layout · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 01 / Shell &amp; Information Architecture</div>
+      <h1>How should the cockpit shell be laid out?</h1>
+      <div class="qsub">
+        The shell is the persistent frame that wraps every view. It decides what telemetry stays in your peripheral vision vs. what you have to navigate to. The three layouts below trade visibility for screen real-estate differently.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all questions</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — Header + Main + always-on Right Rail.</strong>
+      The cockpit feels alive because activity ticker and account quotas never disappear. You're never one tab-switch away from knowing if your weekly quota is about to die or whether a slice just transitioned to <code>review</code>. The 280px price is worth it on a cockpit; flicker-free telemetry is the whole brand.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── Option A: Header + Main + Right Rail (RECOMMENDED) ─────────── -->
+    <article class="option recommended">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Header + Main + always-on Right Rail</h2>
+      </div>
+      <div class="option-preview">
+        <div class="mini" style="position: relative;">
+          <div class="mini-hd">
+            <span class="logo">▟ naml</span>
+            <span class="dot pulse"></span>
+            <span>inpolicy/web ▾</span>
+            <span class="grow"></span>
+            <span class="pill">Dash</span>
+            <span class="pill">Sprint</span>
+            <span class="pill">Settings</span>
+            <span>⚙</span>
+          </div>
+          <div class="mini-body">
+            <div class="mini-main">
+              <div class="row tall"></div>
+              <div class="row wide-grid"><div></div><div></div><div></div></div>
+              <div class="row"></div>
+              <div class="row"></div>
+              <div class="row"></div>
+            </div>
+            <div class="mini-rail">
+              <div class="blk"></div>
+              <div class="blk"></div>
+              <div class="blk"></div>
+              <div class="blk bar"></div>
+              <div class="blk bar"></div>
+              <div class="blk bar"></div>
+            </div>
+          </div>
+          <div class="mini-label" style="top: 4px; left: 50%; transform: translateX(-50%);">HEADER · identity + sync</div>
+          <div class="mini-label" style="top: 50%; right: 8px; transform: translateY(-50%) rotate(90deg); transform-origin: center;">RIGHT RAIL · telemetry</div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Header carries identity + sync dot + project switcher + active sprint pin. Main pane swaps between Dashboard / Sprint / Settings via header tabs. Right rail is permanent: live activity ticker on top, CodexBar-style quota bars below (Session %, Weekly %, Today $). Right rail collapses with <code>⌘\</code> when you need width.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Telemetry never disappears</li>
+              <li>Quota deaths can't ambush you</li>
+              <li>"Synced 2s ago" always visible</li>
+              <li>1:1 with 3 state machines</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>~280px permanent loss</li>
+              <li>Wide DAG views feel tight on 13"</li>
+              <li>Two scroll regions on small screens</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option B: Header + Main only ─────────── -->
+    <article class="option">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Header + Main · rail collapsed by default</h2>
+      </div>
+      <div class="option-preview">
+        <div class="mini" style="position: relative;">
+          <div class="mini-hd">
+            <span class="logo">▟ naml</span>
+            <span class="dot pulse"></span>
+            <span>inpolicy/web ▾</span>
+            <span class="grow"></span>
+            <span class="pill">$4.21</span>
+            <span class="pill">71% · 84%</span>
+            <span class="pill">Dash</span>
+            <span class="pill">Sprint</span>
+            <span>⚙</span>
+          </div>
+          <div class="mini-body">
+            <div class="mini-main" style="flex: 1;">
+              <div class="row tall"></div>
+              <div class="row wide-grid"><div></div><div></div><div></div></div>
+              <div class="row"></div>
+              <div class="row"></div>
+              <div class="row"></div>
+              <div class="row"></div>
+            </div>
+            <div class="mini-rail" style="width: 18px; padding: 8px 4px;">
+              <div class="blk" style="height: 12px;"></div>
+              <div class="blk" style="height: 12px;"></div>
+              <div class="blk" style="height: 12px;"></div>
+            </div>
+          </div>
+          <div class="mini-label" style="top: 4px; right: 8px;">QUOTAS COMPRESSED IN HEADER</div>
+          <div class="mini-label" style="bottom: 8px; right: 4px;">RAIL · 18px strip</div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Quotas compress into small pill chips in the header itself (<code>71% · 84% · $4.21</code>). Activity ticker is hidden behind a flyout (<code>⌘K</code> or hover the strip). Wide main pane wins for DAG visualization and slice grids on smaller laptops.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Full-width DAG / lane grids</li>
+              <li>Cleaner, calmer surface</li>
+              <li>Better on 13" laptops</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Activity feels "hidden"</li>
+              <li>Quota pills crowd the header</li>
+              <li>Less cockpit, more web app</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option C: Left sidebar + Main ─────────── -->
+    <article class="option">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Left sidebar nav + Main · no rail</h2>
+      </div>
+      <div class="option-preview">
+        <div class="mini" style="position: relative;">
+          <div class="mini-hd">
+            <span class="logo">▟ naml</span>
+            <span class="dot pulse"></span>
+            <span class="grow"></span>
+            <span class="pill">inpolicy/web ▾</span>
+            <span>⚙</span>
+          </div>
+          <div class="mini-body">
+            <div class="mini-side">
+              <div class="nav active"></div>
+              <div class="nav"></div>
+              <div class="nav"></div>
+              <div class="nav"></div>
+              <div class="nav"></div>
+              <div class="nav"></div>
+              <div class="nav"></div>
+            </div>
+            <div class="mini-main">
+              <div class="row tall"></div>
+              <div class="row wide-grid"><div></div><div></div><div></div></div>
+              <div class="row"></div>
+              <div class="row"></div>
+              <div class="row"></div>
+            </div>
+          </div>
+          <div class="mini-label" style="top: 50%; left: 8px; transform: translateY(-50%) rotate(-90deg); transform-origin: left center;">SIDEBAR · projects + sprints + inbox</div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Classic web-app shape. Left rail lists projects, then sprints under the active project, then the feedback inbox. Main pane handles dashboard / sprint / settings. No right rail at all — quotas live inside the Dashboard view.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Sprint history is one click</li>
+              <li>Feedback inbox always visible</li>
+              <li>Familiar — feels like Linear/GitHub</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Quotas hidden in a sub-view</li>
+              <li>Telemetry not in peripheral vision</li>
+              <li>Feels like a CRUD app, not a cockpit</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a direction.</strong> Reply with <code>A</code>, <code>B</code>, or <code>C</code> — or describe a hybrid (e.g. "A but rail starts collapsed"). Once you decide, I'll build the next mockup (Q2 — Header) using that shell as its frame.
+    <div class="ask">
+      Also worth flagging: on Option A, do you want the right rail to <strong>collapse to icon-strip</strong> (18px) or <strong>fully hide</strong> when toggled? Icon-strip keeps the sync dot + quota color visible; full-hide gives you maximum width.
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

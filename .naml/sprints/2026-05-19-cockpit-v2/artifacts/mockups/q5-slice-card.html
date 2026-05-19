@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q5 — Slice cards · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .slist {
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    /* ───────────── (A) dense telemetry card ───────────── */
+    .scard {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 10px;
+      position: relative;
+      overflow: hidden;
+    }
+    .scard.active {
+      border-color: rgba(56,189,248,0.35);
+      background: linear-gradient(180deg, rgba(56,189,248,0.04), var(--bg-1));
+    }
+    .scard.review { border-color: rgba(251,191,36,0.3); }
+    .scard.merged { border-color: rgba(52,211,153,0.25); opacity: 0.92; }
+    .scard.failed { border-color: rgba(248,113,113,0.35); }
+    .scard.blocked { opacity: 0.7; }
+
+    /* state stripe on left edge */
+    .scard::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 3px;
+    }
+    .scard.active::before { background: var(--c-work); }
+    .scard.review::before { background: var(--c-review); }
+    .scard.merged::before { background: var(--c-merged); }
+    .scard.failed::before { background: var(--c-failed); }
+    .scard.blocked::before { background: var(--c-blocked); }
+
+    .row1 {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .row1 .sid {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--c-accent);
+      background: rgba(56,189,248,0.1);
+      padding: 2px 6px; border-radius: 3px;
+      flex-shrink: 0;
+    }
+    .row1 .stitle {
+      font-size: 13px; font-weight: 600; color: var(--text-0);
+      flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .row1 .bdg {
+      font-family: var(--mono); font-size: 9px;
+      padding: 2px 6px; border-radius: 3px;
+      letter-spacing: 0.1em;
+    }
+    .bdg.afk { background: rgba(56,189,248,0.1); color: var(--c-accent); }
+    .bdg.hitl { background: rgba(167,139,250,0.12); color: #c4b5fd; }
+    .bdg.lane { background: var(--bg-3); color: var(--text-1); }
+    .row1 .spill {
+      font-family: var(--mono); font-size: 9.5px;
+      padding: 3px 8px; border-radius: 999px;
+      letter-spacing: 0.1em;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .spill.work { background: rgba(56,189,248,0.15); color: var(--c-work); }
+    .spill.work .pd { width: 6px; height: 6px; background: var(--c-work); border-radius: 50%; box-shadow: 0 0 6px var(--c-work); }
+    .spill.review { background: rgba(251,191,36,0.15); color: var(--c-review); }
+    .spill.review .pd { width: 6px; height: 6px; background: var(--c-review); border-radius: 50%; box-shadow: 0 0 6px var(--c-review); }
+    .spill.merged { background: rgba(52,211,153,0.15); color: var(--c-merged); }
+    .spill.merged .pd { width: 6px; height: 6px; background: var(--c-merged); border-radius: 50%; }
+    .spill.failed { background: rgba(248,113,113,0.15); color: var(--c-failed); }
+    .spill.failed .pd { width: 6px; height: 6px; background: var(--c-failed); border-radius: 50%; }
+    .spill.blocked { background: var(--bg-3); color: var(--text-2); }
+
+    /* dual progress row */
+    .meters {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .meter {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .meter .mhead {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: var(--mono); font-size: 9.5px;
+    }
+    .meter .mhead .ml { color: var(--text-3); letter-spacing: 0.1em; }
+    .meter .mhead .mv { color: var(--text-0); font-size: 10.5px; font-weight: 600; }
+    .meter .mhead .mv.warn { color: var(--c-warn); }
+    .meter .mhead .mv.danger { color: var(--c-failed); }
+    .mbar {
+      height: 6px;
+      background: var(--bg-3);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+    .mbar .fill {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: var(--c-accent-2);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+    }
+    .mbar .fill.work { background: linear-gradient(90deg, var(--c-work), #7dd3fc); }
+    .mbar .fill.warn { background: linear-gradient(90deg, var(--c-warn), #fde68a); }
+    .mbar .fill.danger { background: linear-gradient(90deg, var(--c-failed), #fda4af); }
+    .mbar .budget {
+      position: absolute; top: -2px; bottom: -2px;
+      width: 1px; background: var(--text-3);
+    }
+
+    /* stats strip */
+    .stats {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+    }
+    .stats .s { display: inline-flex; align-items: center; gap: 5px; }
+    .stats .s .l { color: var(--text-3); font-size: 9.5px; letter-spacing: 0.1em; }
+    .stats .s .v { color: var(--text-0); font-weight: 600; }
+    .stats .s .v.warn { color: var(--c-warn); }
+    .stats .s .v.danger { color: var(--c-failed); }
+    .stats .sep { color: var(--text-3); }
+    .stats .grow { flex: 1; }
+    .stats .actions { display: inline-flex; gap: 4px; }
+    .stats .iconmini {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-2); border: 1px solid var(--border-soft);
+      border-radius: 4px;
+      color: var(--text-2);
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .stats .iconmini:hover { color: var(--c-accent); border-color: var(--c-accent); }
+
+    /* state mini-traversal under card */
+    .traverse {
+      display: flex; gap: 0; align-items: center;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3);
+      margin-top: 2px;
+    }
+    .traverse .st {
+      padding: 2px 7px; border-radius: 3px;
+      background: var(--bg-2); border: 1px solid var(--border-soft);
+    }
+    .traverse .st.done { background: rgba(52,211,153,0.08); color: var(--c-accent-2); border-color: rgba(52,211,153,0.2); }
+    .traverse .st.curr { background: rgba(56,189,248,0.12); color: var(--c-accent); border-color: rgba(56,189,248,0.3); }
+    .traverse .arr { color: var(--text-3); padding: 0 4px; }
+    .traverse .retry {
+      color: var(--c-warn);
+      background: rgba(251,191,36,0.1);
+      padding: 1px 5px; border-radius: 3px;
+      margin-left: 4px;
+    }
+
+    /* review/pr inline detail */
+    .inline-detail {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 8px;
+      background: var(--bg-2);
+      border-radius: 5px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-2);
+    }
+    .inline-detail .verdict {
+      padding: 2px 6px; border-radius: 3px;
+      font-weight: 700;
+    }
+    .verdict.lgtm { background: rgba(52,211,153,0.15); color: var(--c-accent-2); }
+    .verdict.changes { background: rgba(251,191,36,0.15); color: var(--c-warn); }
+    .verdict.abandon { background: rgba(248,113,113,0.15); color: var(--c-failed); }
+
+    /* ───────────── (B) minimal card ───────────── */
+    .mcard {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: auto 1fr 1fr auto auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .mcard .micon {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-3); border: 1px solid var(--border);
+      color: var(--text-3); font-family: var(--mono); font-size: 10px;
+    }
+    .mcard.work .micon { background: rgba(56,189,248,0.15); color: var(--c-work); border-color: var(--c-work); box-shadow: 0 0 8px rgba(56,189,248,0.3); }
+    .mcard.merged .micon { background: rgba(52,211,153,0.15); color: var(--c-merged); border-color: var(--c-merged); }
+    .mcard .mt {
+      font-size: 12px; color: var(--text-0); font-weight: 500;
+    }
+    .mcard .mb {
+      height: 5px; background: var(--bg-3); border-radius: 3px; overflow: hidden;
+      position: relative;
+    }
+    .mcard .mb .ff {
+      position: absolute; inset: 0;
+      width: 62%;
+      background: linear-gradient(90deg, var(--c-work), var(--c-accent-2));
+      border-radius: 3px;
+    }
+    .mcard .mc { font-family: var(--mono); font-size: 10.5px; color: var(--text-1); }
+    .mcard .open {
+      font-family: var(--mono); font-size: 10px; color: var(--c-accent);
+      padding: 4px 8px;
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.25);
+      border-radius: 4px;
+    }
+
+    /* ───────────── (C) spreadsheet row ───────────── */
+    .ssheet {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .ssheet .hd, .ssheet .rw {
+      display: grid;
+      grid-template-columns: 28px 30px 1fr 80px 60px 70px 50px 60px 70px 64px;
+      gap: 8px;
+      align-items: center;
+      padding: 7px 10px;
+      font-family: var(--mono); font-size: 10px;
+    }
+    .ssheet .hd {
+      background: var(--bg-2);
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .ssheet .rw {
+      border-top: 1px solid var(--border-soft);
+      color: var(--text-1);
+    }
+    .ssheet .rw:first-of-type { border-top: none; }
+    .ssheet .rw b { color: var(--text-0); }
+    .ssheet .rw .sdot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block;
+    }
+    .ssheet .sdot.work { background: var(--c-work); box-shadow: 0 0 6px var(--c-work); }
+    .ssheet .sdot.review { background: var(--c-review); }
+    .ssheet .sdot.merged { background: var(--c-merged); }
+    .ssheet .sdot.failed { background: var(--c-failed); }
+    .ssheet .sdot.blocked { background: var(--c-blocked); }
+    .ssheet .micbar {
+      height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden;
+      position: relative;
+    }
+    .ssheet .micbar .f { position: absolute; inset: 0; }
+    .ssheet .micbar .f.ok { background: var(--c-accent-2); }
+    .ssheet .micbar .f.warn { background: var(--c-warn); }
+    .ssheet .micbar .f.danger { background: var(--c-failed); }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 05 / Slice cards</div>
+      <h1>What goes on a slice card?</h1>
+      <div class="qsub">
+        Slice cards are the densest information surface in the cockpit. They have to carry: state, duration in state, context-window %, token cost, retry attempts, session ID, branch + PR, review verdict, last gate. Trade-off: how much telemetry per card vs. how many cards fit on screen.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q4-sprint-state.html">← Q4</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — dense telemetry cards (~110px).</strong>
+      Title + state pill on row 1, <em>dual progress bars</em> on row 2 (duration vs. budget + context window %), stats strip on row 3 (cost, retries, branch, session-id with copy/terminal buttons). Mini traversal pill chain underneath shows the path through states. The context-window meter is the highest-value signal — it turns amber at 70%, red at 85% — that's your "smoke" alarm before a slice burns out.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ───────── Option A: dense telemetry card (RECOMMENDED) ───────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Dense telemetry card · dual progress + stats strip + traversal</h2>
+      </div>
+      <div class="option-preview">
+        <div class="slist">
+
+          <!-- working slice -->
+          <div class="scard active">
+            <div class="row1">
+              <span class="sid">slice-4</span>
+              <span class="stitle">Add HTML renderer with mock-target snapshot</span>
+              <span class="bdg afk">AFK</span>
+              <span class="bdg lane">lane-2</span>
+              <span class="spill work"><span class="pd pulse"></span>WORK</span>
+            </div>
+            <div class="meters">
+              <div class="meter">
+                <div class="mhead">
+                  <span class="ml">DURATION · IN STATE</span>
+                  <span class="mv">6m 12s <span style="color: var(--text-3)">/ ~9m budget</span></span>
+                </div>
+                <div class="mbar">
+                  <div class="fill work" style="width: 68%;"></div>
+                  <div class="budget" style="left: 88%;"></div>
+                </div>
+              </div>
+              <div class="meter">
+                <div class="mhead">
+                  <span class="ml">CONTEXT WINDOW</span>
+                  <span class="mv warn">73% <span style="color: var(--text-3)">· 146k / 200k</span></span>
+                </div>
+                <div class="mbar">
+                  <div class="fill warn" style="width: 73%;"></div>
+                </div>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="s"><span class="l">COST</span><span class="v">$0.41</span></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">TOKENS</span><span class="v">82k in · 14k out · 1.2M cache</span></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">RETRY</span><span class="v warn">1 / 2</span></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">GATE</span><span class="v">typecheck ▶</span></span>
+              <span class="grow"></span>
+              <span class="s"><span class="l">SESSION</span><code>9b0c…ef13</code></span>
+              <span class="actions">
+                <span class="iconmini" title="copy session id">⎘</span>
+                <span class="iconmini" title="open in terminal">▶</span>
+                <span class="iconmini" title="view branch">⎇</span>
+              </span>
+            </div>
+            <div class="traverse">
+              <span class="st done">setup</span><span class="arr">→</span>
+              <span class="st curr">work <span class="retry">retry 1/2</span></span><span class="arr">→</span>
+              <span class="st">pr</span><span class="arr">→</span>
+              <span class="st">review</span><span class="arr">→</span>
+              <span class="st">merged</span>
+            </div>
+          </div>
+
+          <!-- review slice -->
+          <div class="scard review">
+            <div class="row1">
+              <span class="sid">slice-3</span>
+              <span class="stitle">Render config schema validator</span>
+              <span class="bdg afk">AFK</span>
+              <span class="bdg lane">lane-1</span>
+              <span class="spill review"><span class="pd pulse"></span>REVIEW</span>
+            </div>
+            <div class="meters">
+              <div class="meter">
+                <div class="mhead"><span class="ml">DURATION · IN STATE</span><span class="mv">1m 48s</span></div>
+                <div class="mbar"><div class="fill warn" style="width: 30%;"></div></div>
+              </div>
+              <div class="meter">
+                <div class="mhead"><span class="ml">CONTEXT WINDOW</span><span class="mv">41% <span style="color: var(--text-3)">· 82k / 200k</span></span></div>
+                <div class="mbar"><div class="fill work" style="width: 41%;"></div></div>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="s"><span class="l">COST</span><span class="v">$0.28</span></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">PR</span><a style="color: var(--c-accent)">#142</a></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">REVIEWER</span><code>A2-fresh</code></span>
+              <span class="grow"></span>
+              <span class="actions">
+                <span class="iconmini">⎘</span>
+                <span class="iconmini">▶</span>
+                <span class="iconmini">↗</span>
+              </span>
+            </div>
+            <div class="inline-detail">
+              <span style="color: var(--text-3); letter-spacing: 0.1em;">VERDICT WAITING</span>
+              <span class="verdict changes" style="opacity: 0.5">REQUEST_CHANGES</span>
+              <span class="verdict lgtm" style="opacity: 0.5">LGTM</span>
+              <span style="color: var(--text-3)">reviewer running…</span>
+            </div>
+          </div>
+
+          <!-- merged slice -->
+          <div class="scard merged">
+            <div class="row1">
+              <span class="sid">slice-2</span>
+              <span class="stitle">Config schema + golden tests</span>
+              <span class="bdg afk">AFK</span>
+              <span class="spill merged"><span class="pd"></span>MERGED</span>
+            </div>
+            <div class="meters">
+              <div class="meter">
+                <div class="mhead"><span class="ml">TOTAL DURATION</span><span class="mv">11m 42s</span></div>
+                <div class="mbar"><div class="fill" style="width: 100%;"></div></div>
+              </div>
+              <div class="meter">
+                <div class="mhead"><span class="ml">PEAK CONTEXT</span><span class="mv">58%</span></div>
+                <div class="mbar"><div class="fill work" style="width: 58%;"></div></div>
+              </div>
+            </div>
+            <div class="stats">
+              <span class="s"><span class="l">COST</span><span class="v">$0.74</span></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">PR</span><a style="color: var(--c-accent)">#141 merged ✓</a></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">TIER</span><span class="v">1</span></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">REVIEW</span><span class="verdict lgtm" style="font-size: 9px; padding: 1px 5px;">LGTM</span></span>
+              <span class="grow"></span>
+              <span class="actions">
+                <span class="iconmini">📄</span>
+                <span class="iconmini">↗</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- blocked slice -->
+          <div class="scard blocked">
+            <div class="row1">
+              <span class="sid">slice-5</span>
+              <span class="stitle">Eval harness integration</span>
+              <span class="bdg afk">AFK</span>
+              <span class="spill blocked">BLOCKED · waits on slice-4</span>
+            </div>
+            <div class="stats" style="opacity: 0.7">
+              <span class="s"><span class="l">DEPENDS</span><code>slice-3, slice-4</code></span>
+              <span class="sep">·</span>
+              <span class="s"><span class="l">TOUCHES</span><code>tests/eval/**</code></span>
+              <span class="grow"></span>
+              <span style="color: var(--text-3)">queued for next free lane</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Each card answers four questions instantly: <em>where is it in the state machine, is it taking too long, is it about to run out of context, how much has it cost so far</em>. Context-window meter turns amber at 70%, red at 85% — that's the most actionable signal in the entire cockpit. Session-ID + buttons (copy / open-terminal / view-branch) let you intervene in one click.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Context window % = "smoke alarm"</li>
+              <li>Duration vs. budget = pacing</li>
+              <li>Session controls inline</li>
+              <li>State traversal shows retry history</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>~110px per card — ~5 cards/screen</li>
+              <li>Many fonts/colors per card</li>
+              <li>Could overwhelm at 8+ slices</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ───────── Option B: minimal card ───────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Minimal status card · single bar, detail in drawer</h2>
+      </div>
+      <div class="option-preview">
+        <div class="slist">
+          <div class="mcard work">
+            <span class="micon pulse">▶</span>
+            <span class="mt">slice-4 · HTML renderer with mock-target snapshot</span>
+            <span class="mb"><span class="ff"></span></span>
+            <span class="mc">$0.41 · 6m12s</span>
+            <span class="open">OPEN →</span>
+          </div>
+          <div class="mcard">
+            <span class="micon" style="background: rgba(251,191,36,0.15); color: var(--c-review); border-color: var(--c-review)">R</span>
+            <span class="mt">slice-3 · Render config schema validator</span>
+            <span class="mb"><span class="ff" style="width: 78%; background: linear-gradient(90deg, var(--c-review), var(--c-work))"></span></span>
+            <span class="mc">$0.28 · 1m48s</span>
+            <span class="open">OPEN →</span>
+          </div>
+          <div class="mcard merged">
+            <span class="micon">✓</span>
+            <span class="mt">slice-2 · Config schema + golden tests</span>
+            <span class="mb"><span class="ff" style="width: 100%; background: var(--c-accent-2)"></span></span>
+            <span class="mc">$0.74 · 11m42s</span>
+            <span class="open">VIEW →</span>
+          </div>
+          <div class="mcard" style="opacity: 0.55;">
+            <span class="micon">⏸</span>
+            <span class="mt">slice-5 · Eval harness integration <span style="color: var(--text-3); font-size: 10px;">· blocked on slice-4</span></span>
+            <span class="mb"><span class="ff" style="width: 0%;"></span></span>
+            <span class="mc">—</span>
+            <span class="open">—</span>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Single-line card. State icon + title + slice-progress bar + cost + time. Everything else (context window, retries, gate, session) lives in a click-through drawer. Calm, simple — but you lose at-a-glance "is this slice about to die" awareness.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>~40px per card — 12 fit on screen</li>
+              <li>Visually calm during long runs</li>
+              <li>Easy for non-technical users</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Context-window smoke alarm hidden</li>
+              <li>Retries hidden</li>
+              <li>Need a click to act</li>
+              <li>Doesn't feel like a "cockpit"</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ───────── Option C: spreadsheet row ───────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Spreadsheet row · everything in columns</h2>
+      </div>
+      <div class="option-preview">
+        <div class="slist">
+          <div class="ssheet">
+            <div class="hd">
+              <div></div>
+              <div></div>
+              <div>SLICE</div>
+              <div>STATE</div>
+              <div>DUR</div>
+              <div>CTX %</div>
+              <div>RETRY</div>
+              <div>COST</div>
+              <div>PR</div>
+              <div></div>
+            </div>
+            <div class="rw">
+              <div><span class="sdot work pulse"></span></div>
+              <div>4</div>
+              <div><b>HTML renderer with mock-target snapshot</b></div>
+              <div>work</div>
+              <div>6m12s</div>
+              <div><div class="micbar"><div class="f warn" style="width: 73%"></div></div></div>
+              <div style="color: var(--c-warn)">1/2</div>
+              <div>$0.41</div>
+              <div>—</div>
+              <div style="text-align: right; color: var(--c-accent)">OPEN ↗</div>
+            </div>
+            <div class="rw">
+              <div><span class="sdot review pulse"></span></div>
+              <div>3</div>
+              <div><b>Render config schema validator</b></div>
+              <div>review</div>
+              <div>1m48s</div>
+              <div><div class="micbar"><div class="f ok" style="width: 41%"></div></div></div>
+              <div>0</div>
+              <div>$0.28</div>
+              <div style="color: var(--c-accent)">#142</div>
+              <div style="text-align: right; color: var(--c-accent)">OPEN ↗</div>
+            </div>
+            <div class="rw">
+              <div><span class="sdot merged"></span></div>
+              <div>2</div>
+              <div><b>Config schema + golden tests</b></div>
+              <div>merged</div>
+              <div>11m42s</div>
+              <div><div class="micbar"><div class="f ok" style="width: 58%"></div></div></div>
+              <div>0</div>
+              <div>$0.74</div>
+              <div style="color: var(--text-2)">#141 ✓</div>
+              <div style="text-align: right">VIEW</div>
+            </div>
+            <div class="rw" style="opacity: 0.55;">
+              <div><span class="sdot blocked"></span></div>
+              <div>5</div>
+              <div><b>Eval harness integration</b></div>
+              <div>blocked</div>
+              <div>—</div>
+              <div><div class="micbar"></div></div>
+              <div>—</div>
+              <div>—</div>
+              <div>—</div>
+              <div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Slim table. Every metric in a column. Maximum scannable density — 12–15 slices fit without scroll. Best for sprints with many slices. Less character; reads like a CI dashboard.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Densest possible — all info, all rows</li>
+              <li>Sortable / filterable</li>
+              <li>Compare slices side-by-side easily</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>No state stripe — eye has to find the dot</li>
+              <li>Stats less prominent (tiny numbers)</li>
+              <li>Less "alive" — no animation per slice</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a slice card style.</strong> Reply with <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      A few micro-decisions inside A:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Duration budget</strong> — I show a <code>~9m budget</code> tick mark. Sourced from? (a) hardcoded default per state, (b) learned from past slices in this project, (c) drop the budget mark entirely. I'd default to (a) until enough history, then auto-learn.</li>
+        <li><strong>Context-window thresholds</strong> — amber at 70%, red at 85%. Comfortable, or pull them tighter (60/80)?</li>
+        <li><strong>Stats strip overflow</strong> — if cost + tokens + retry + gate + session don't fit, what gets dropped first? My pick: tokens detail (collapse to just <code>$cost</code>; expand on hover).</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

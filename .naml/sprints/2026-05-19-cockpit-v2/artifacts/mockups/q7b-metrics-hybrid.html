@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q7b — Metrics hybrid · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .surfaces {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      gap: 14px;
+    }
+    .label-strip {
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3); letter-spacing: 0.14em;
+      padding: 4px 6px;
+      border-bottom: 1px dashed var(--border-soft);
+      margin-bottom: 4px;
+    }
+
+    /* ────── RIGHT RAIL (comprehensive) ────── */
+    .rail {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 0;
+      font-family: var(--mono); font-size: 10.5px;
+    }
+    .rail .seg {
+      padding: 10px 0;
+      border-top: 1px solid var(--border-soft);
+    }
+    .rail .seg:first-child { padding-top: 0; border-top: none; }
+    .rail .tag {
+      font-size: 9px; letter-spacing: 0.14em; color: var(--text-3);
+      margin-bottom: 6px;
+      display: flex; justify-content: space-between;
+    }
+    .rail .row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 11px;
+      padding: 1px 0;
+    }
+    .rail .row .l { color: var(--text-2); }
+    .rail .row .v { color: var(--text-0); font-weight: 600; }
+    .rail .row .v.warn { color: var(--c-warn); }
+    .rail .row .v.danger { color: var(--c-failed); }
+    .rail .row .v.ok { color: var(--c-accent-2); }
+    .rail .row .v.lifetime { color: var(--c-accent); font-size: 13px; }
+    .rail .qbar {
+      height: 5px; background: var(--bg-3); border-radius: 3px; overflow: hidden;
+      position: relative; margin: 4px 0 2px;
+    }
+    .rail .qbar .qf { position: absolute; inset: 0; }
+    .rail .qbar .qf.ok { background: var(--c-accent-2); }
+    .rail .qbar .qf.warn { background: var(--c-warn); }
+    .rail .qbar .qf.cost { background: linear-gradient(90deg, var(--c-accent), var(--c-accent-2)); }
+    .rail .reset { font-size: 9px; color: var(--text-3); }
+    .rail .spark {
+      height: 28px; display: flex; align-items: flex-end; gap: 2px;
+      margin-top: 6px;
+    }
+    .rail .spark i {
+      flex: 1; background: rgba(56,189,248,0.25); border-radius: 1px;
+      min-height: 2px;
+    }
+    .rail .spark i.hi { background: var(--c-accent); }
+    .rail .spark i.warn { background: var(--c-warn); }
+    .rail .spark-x {
+      display: flex; justify-content: space-between;
+      font-size: 8px; color: var(--text-3); margin-top: 2px;
+    }
+    .activity .a {
+      font-size: 10px; color: var(--text-2);
+      padding: 3px 0;
+      border-top: 1px dashed var(--border-soft);
+    }
+    .activity .a:first-of-type { border-top: none; }
+    .activity .a .ts { color: var(--text-3); margin-right: 5px; }
+    .activity .a .ev { color: var(--text-1); }
+    .activity .a .ev .sid { color: var(--c-accent); }
+
+    /* the headline COST TIMELINE block */
+    .cost-tl {
+      background: linear-gradient(180deg, rgba(56,189,248,0.06), transparent);
+      border: 1px solid rgba(56,189,248,0.18);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 8px 0 2px;
+    }
+    .cost-tl .row { padding: 2px 0; }
+    .cost-tl .row .v { font-weight: 700; }
+    .cost-tl .lifetime-row {
+      border-top: 1px solid rgba(56,189,248,0.25);
+      margin-top: 4px; padding-top: 4px;
+    }
+
+    /* ────── MAIN COLUMN ────── */
+    .col {
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* HERO — primary cost cluster on top, secondary health below */
+    .hero {
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .hero-top {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+      align-items: center;
+    }
+    .hero .pname {
+      font-family: var(--mono); font-size: 13px;
+      color: var(--text-0); font-weight: 600;
+    }
+    .hero .pstate {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 2px 8px;
+      background: rgba(56,189,248,0.12);
+      color: var(--c-accent);
+      border: 1px solid rgba(56,189,248,0.3);
+      border-radius: 999px;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      margin-left: 6px;
+    }
+    .hero .pstate .pdot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--c-accent); box-shadow: 0 0 5px var(--c-accent);
+    }
+    .hero .psub { color: var(--text-2); font-size: 10.5px; margin-top: 3px; font-family: var(--mono); }
+
+    /* primary cost cluster — 4 big stats */
+    .pcost {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+      padding: 12px 14px;
+      background: var(--bg-0);
+      border-radius: 8px;
+      border: 1px solid var(--border-soft);
+    }
+    .pcost .pstat {
+      display: flex; flex-direction: column; gap: 3px;
+      border-right: 1px solid var(--border-soft); padding-right: 14px;
+    }
+    .pcost .pstat:last-child { border-right: none; }
+    .pcost .pstat .l {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); letter-spacing: 0.14em; text-transform: uppercase;
+    }
+    .pcost .pstat .v {
+      font-family: var(--mono); font-size: 22px;
+      color: var(--text-0); font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .pcost .pstat .v.lifetime { color: var(--c-accent); }
+    .pcost .pstat .v.warn { color: var(--c-warn); }
+    .pcost .pstat .sub {
+      font-family: var(--mono); font-size: 9.5px; color: var(--text-2);
+      display: flex; gap: 8px;
+    }
+    .pcost .pstat .sub .delta { color: var(--c-accent-2); }
+    .pcost .pstat .sub .delta.up { color: var(--c-warn); }
+
+    /* secondary health row */
+    .health {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+      padding: 8px 4px 4px;
+    }
+    .health .h {
+      display: flex; flex-direction: column; gap: 2px;
+      padding-left: 10px;
+      border-left: 2px solid var(--border-soft);
+    }
+    .health .h.alert { border-left-color: var(--c-warn); }
+    .health .h .l {
+      font-family: var(--mono); font-size: 8.5px;
+      color: var(--text-3); letter-spacing: 0.1em; text-transform: uppercase;
+    }
+    .health .h .v {
+      font-family: var(--mono); font-size: 13px;
+      color: var(--text-0); font-weight: 600;
+    }
+    .health .h .v.ok { color: var(--c-accent-2); }
+    .health .h .v.warn { color: var(--c-warn); }
+    .health .h .v.danger { color: var(--c-failed); }
+    .health .h .trend {
+      font-family: var(--mono); font-size: 9px; color: var(--text-3);
+    }
+    .health .h .trend.up { color: var(--c-accent-2); }
+    .health .h .trend.dn { color: var(--c-failed); }
+
+    /* sprint aux strip */
+    .saux {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; gap: 14px; align-items: center;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .saux .saxlbl { font-size: 9px; letter-spacing: 0.12em; color: var(--text-3); margin-right: 6px; }
+    .saux .sst { display: inline-flex; gap: 5px; align-items: baseline; }
+    .saux .sst b { color: var(--text-0); font-size: 11.5px; font-weight: 600; }
+    .saux .sst b.ok { color: var(--c-accent-2); }
+    .saux .sst b.warn { color: var(--c-warn); }
+    .saux .div { width: 1px; height: 14px; background: var(--border-soft); }
+
+    /* slice stats row */
+    .sliceblk {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; gap: 14px; align-items: center;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .sliceblk .saxlbl { font-size: 9px; letter-spacing: 0.12em; color: var(--text-3); margin-right: 6px; }
+    .sliceblk b { color: var(--text-0); font-weight: 600; }
+    .sliceblk b.warn { color: var(--c-warn); }
+    .sliceblk b.ok { color: var(--c-accent-2); }
+    .sliceblk b.danger { color: var(--c-failed); }
+    .sliceblk .div { width: 1px; height: 14px; background: var(--border-soft); }
+
+    /* health page teaser */
+    .health-teaser {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 14px;
+    }
+    .ht-card {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .ht-card .l {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); letter-spacing: 0.12em;
+    }
+    .ht-card .v {
+      font-family: var(--mono); font-size: 14px; color: var(--text-0); font-weight: 600;
+    }
+    .ht-card .vsub { font-family: var(--mono); font-size: 9.5px; color: var(--text-2); }
+    .ht-card .gline {
+      height: 28px;
+      background: var(--bg-2);
+      border-radius: 4px;
+      padding: 4px;
+      position: relative;
+      overflow: hidden;
+    }
+    .ht-card svg { width: 100%; height: 100%; display: block; }
+
+    .ht-link {
+      text-align: right;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--c-accent);
+      padding: 6px 10px 0;
+    }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 07b / Metrics — comprehensive hybrid</div>
+      <h1>Headline: "how much have I spent on this project, and at what rate?"</h1>
+      <div class="qsub">
+        Everything from A + B + C is preserved, but the cost timeline (<strong>today / this week / last 30d / lifetime</strong>) takes the most prominent slots. Health metrics get a dense secondary row underneath. Slice + sprint telemetry unchanged. A Settings → Health teaser is shown at the bottom to make clear the trend graphs live there, not on the daily cockpit.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q7-metrics.html">← Q7 (skews)</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Comprehensive hybrid · cost timeline as headline · health row as secondary.</strong>
+      Right rail carries the full <em>Cost Timeline</em> block (today / week / 30d / lifetime) plus quotas, activity, sync. Dashboard hero has a <em>Primary Cost Cluster</em> on top (Today / This Week / Lifetime / $ per sprint avg) with a <em>Secondary Health Row</em> of 6 stats underneath (tier-1, avg duration, sprints/wk, slice fail %, LGTM 1st pass, review iters). Sprint aux and slice stats stay loud (live ops). Settings → Health page is teased at the bottom — that's where long-horizon trends and graphs live, so the daily cockpit stays scannable.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">COMPREHENSIVE HYBRID</div>
+        <h2>Cost timeline + health row + full live ops + trends teaser</h2>
+      </div>
+      <div class="option-preview">
+        <div class="surfaces">
+
+          <!-- ───── RIGHT RAIL ───── -->
+          <div>
+            <div class="label-strip">RIGHT RAIL · always on</div>
+            <div class="rail">
+              <!-- sync + activity -->
+              <div class="seg">
+                <div class="tag"><span>SYNC</span><span style="color: var(--c-accent-2)">▢ 2s ago</span></div>
+                <div class="activity">
+                  <div class="a"><span class="ts">14:23</span><span class="ev"><span class="sid">slice-3</span> → review</span></div>
+                  <div class="a"><span class="ts">14:21</span><span class="ev"><span class="sid">slice-2</span> merged ✓</span></div>
+                  <div class="a"><span class="ts">14:18</span><span class="ev">lane-3 idle</span></div>
+                </div>
+              </div>
+
+              <!-- COST TIMELINE — the headline -->
+              <div class="seg">
+                <div class="tag"><span>COST TIMELINE</span><span style="color: var(--c-accent)">▴</span></div>
+                <div class="cost-tl">
+                  <div class="row"><span class="l">today</span><span class="v">$4.21</span></div>
+                  <div class="row"><span class="l">this week</span><span class="v">$24.80</span></div>
+                  <div class="row"><span class="l">last 30d</span><span class="v">$118.42</span></div>
+                  <div class="row lifetime-row"><span class="l">lifetime</span><span class="v lifetime">$342.16</span></div>
+                </div>
+                <div class="spark">
+                  <i style="height: 18%"></i><i style="height: 32%"></i><i style="height: 24%"></i><i style="height: 38%"></i><i style="height: 60%"></i><i style="height: 28%"></i><i style="height: 44%"></i><i style="height: 70%"></i><i style="height: 52%"></i><i style="height: 36%"></i><i style="height: 48%"></i><i style="height: 76%"></i><i class="warn" style="height: 92%"></i><i class="hi" style="height: 64%"></i>
+                </div>
+                <div class="spark-x">
+                  <span>14d ago</span>
+                  <span>today</span>
+                </div>
+                <div class="row" style="margin-top: 6px;"><span class="l">tokens today</span><span class="v">9.2M</span></div>
+                <div class="row"><span class="l">tokens · 30d</span><span class="v">218M</span></div>
+              </div>
+
+              <!-- QUOTAS -->
+              <div class="seg">
+                <div class="tag">SESSION QUOTA</div>
+                <div class="row"><span class="l">used</span><span class="v">29%</span></div>
+                <div class="qbar"><div class="qf ok" style="width: 29%"></div></div>
+                <div class="reset">resets in 50m</div>
+              </div>
+              <div class="seg">
+                <div class="tag">WEEKLY QUOTA</div>
+                <div class="row"><span class="l">used</span><span class="v warn">84%</span></div>
+                <div class="qbar"><div class="qf warn" style="width: 84%"></div></div>
+                <div class="reset">resets in 5d 8h · est empty Thu 6pm</div>
+              </div>
+
+              <!-- per-project sub-rollup -->
+              <div class="seg">
+                <div class="tag">THIS PROJECT</div>
+                <div class="row"><span class="l">share of weekly</span><span class="v">62%</span></div>
+                <div class="row"><span class="l">share of lifetime</span><span class="v">71%</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ───── MAIN COLUMN ───── -->
+          <div class="col">
+
+            <!-- HERO -->
+            <div class="label-strip">DASHBOARD HERO</div>
+            <div class="hero">
+              <div class="hero-top">
+                <div>
+                  <span class="pname">inpolicy/web</span>
+                  <span class="pstate"><span class="pdot pulse"></span>ACTIVE</span>
+                  <div class="psub">3 lanes · main · 14 sprints shipped · last merge 22m ago</div>
+                </div>
+                <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); text-align: right;">
+                  ↘ daily burn <span style="color: var(--text-0); font-weight: 600;">$5.92 avg · 7d</span>
+                </div>
+              </div>
+
+              <!-- primary COST cluster -->
+              <div class="pcost">
+                <div class="pstat">
+                  <div class="l">TODAY</div>
+                  <div class="v">$4.21</div>
+                  <div class="sub">
+                    <span>9.2M tokens</span>
+                    <span class="delta up">+18% vs yesterday</span>
+                  </div>
+                </div>
+                <div class="pstat">
+                  <div class="l">THIS WEEK</div>
+                  <div class="v">$24.80</div>
+                  <div class="sub">
+                    <span>56M tokens</span>
+                    <span class="delta">-12% vs last wk</span>
+                  </div>
+                </div>
+                <div class="pstat">
+                  <div class="l">LAST 30 DAYS</div>
+                  <div class="v">$118.42</div>
+                  <div class="sub">
+                    <span>218M tokens</span>
+                  </div>
+                </div>
+                <div class="pstat">
+                  <div class="l">LIFETIME · PROJECT</div>
+                  <div class="v lifetime">$342.16</div>
+                  <div class="sub">
+                    <span>since 2026-03-14</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- secondary HEALTH row -->
+              <div class="health">
+                <div class="h">
+                  <span class="l">TIER-1 · 7d</span>
+                  <span class="v ok">78%</span>
+                  <span class="trend up">+4 pp ↗</span>
+                </div>
+                <div class="h">
+                  <span class="l">AVG SPRINT</span>
+                  <span class="v">37m</span>
+                  <span class="trend up">-3m ↘</span>
+                </div>
+                <div class="h">
+                  <span class="l">SPRINTS / WK</span>
+                  <span class="v">5</span>
+                  <span class="trend">±0</span>
+                </div>
+                <div class="h alert">
+                  <span class="l">SLICE FAIL</span>
+                  <span class="v warn">5.6%</span>
+                  <span class="trend dn">+1.2 pp ↗</span>
+                </div>
+                <div class="h">
+                  <span class="l">LGTM 1ST</span>
+                  <span class="v ok">82%</span>
+                  <span class="trend up">+2 pp</span>
+                </div>
+                <div class="h">
+                  <span class="l">REVIEW ITER</span>
+                  <span class="v">1.2</span>
+                  <span class="trend">stable</span>
+                </div>
+              </div>
+
+              <!-- tertiary "more" row (collapsible-by-default; here shown expanded) -->
+              <div class="health" style="opacity: 0.85;">
+                <div class="h">
+                  <span class="l">$ / SPRINT AVG</span>
+                  <span class="v">$1.84</span>
+                  <span class="trend">p95 $3.92</span>
+                </div>
+                <div class="h">
+                  <span class="l">$ / MERGED PR</span>
+                  <span class="v">$0.42</span>
+                </div>
+                <div class="h">
+                  <span class="l">TTFP MEDIAN</span>
+                  <span class="v">2m 40s</span>
+                </div>
+                <div class="h">
+                  <span class="l">RETRY RATE</span>
+                  <span class="v">11%</span>
+                </div>
+                <div class="h">
+                  <span class="l">PEAK CTX AVG</span>
+                  <span class="v">58%</span>
+                </div>
+                <div class="h">
+                  <span class="l">DAG UTIL</span>
+                  <span class="v">86%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- SPRINT aux -->
+            <div class="label-strip">SPRINT AUX STRIP · on Sprint view</div>
+            <div class="saux">
+              <span class="saxlbl">LIVE SPRINT</span>
+              <span class="sst">elapsed <b>21m 14s</b></span>
+              <span class="div"></span>
+              <span class="sst">eta <b class="ok">~14m</b></span>
+              <span class="div"></span>
+              <span class="sst">cost so far <b>$2.41</b></span>
+              <span class="div"></span>
+              <span class="sst">proj total <b>$3.92</b></span>
+              <span class="div"></span>
+              <span class="sst">lanes <b>3 / 3</b></span>
+              <span class="div"></span>
+              <span class="sst">slices <b>5 / 8</b></span>
+              <span class="div"></span>
+              <span class="sst">retries <b>1</b></span>
+              <span class="div"></span>
+              <span class="sst">tier-1 so far <b class="ok">2 / 2</b></span>
+              <span class="div"></span>
+              <span class="sst">LGTM <b class="ok">2 / 2</b></span>
+              <span style="flex: 1"></span>
+              <span style="color: var(--text-3); font-size: 9.5px">▢ tick 2s ago</span>
+            </div>
+
+            <!-- SLICE stats -->
+            <div class="label-strip">SLICE STATS · inside each slice card</div>
+            <div class="sliceblk">
+              <span class="saxlbl">SLICE-4 · WORK</span>
+              <span>dur <b>6m12s</b></span>
+              <span class="div"></span>
+              <span>ctx <b class="warn">73%</b></span>
+              <span class="div"></span>
+              <span>cost <b>$0.41</b></span>
+              <span class="div"></span>
+              <span>proj total <b>$0.78</b></span>
+              <span class="div"></span>
+              <span>tokens <b>82k · 14k · 1.2M</b></span>
+              <span class="div"></span>
+              <span>retry <b class="warn">1 / 2</b></span>
+              <span class="div"></span>
+              <span>gate <b>typecheck ▶</b></span>
+              <span class="div"></span>
+              <span>last err <b class="danger">type mismatch in renderer.ts</b></span>
+              <span style="flex: 1"></span>
+              <span>session <code>9b0c…ef13</code></span>
+            </div>
+
+            <!-- HEALTH page teaser -->
+            <div class="label-strip" style="margin-top: 6px;">SETTINGS → HEALTH PAGE · trends &amp; long-horizon (linked, not here)</div>
+            <div class="health-teaser">
+              <div class="ht-card">
+                <span class="l">DAILY COST · 30D</span>
+                <span class="v">$118.42 total</span>
+                <span class="vsub">avg $3.94 / day · peak $11.20</span>
+                <div class="gline">
+                  <svg viewBox="0 0 220 20" preserveAspectRatio="none">
+                    <polyline points="0,15 18,12 36,14 54,8 72,10 90,5 108,12 126,7 144,11 162,4 180,8 198,3 220,6"
+                      stroke="#38bdf8" stroke-width="1.5" fill="none"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="ht-card">
+                <span class="l">TIER-1 HIT · 30D</span>
+                <span class="v">78% rolling</span>
+                <span class="vsub">7-day: 78% · 30-day: 74% · trend ↗</span>
+                <div class="gline">
+                  <svg viewBox="0 0 220 20" preserveAspectRatio="none">
+                    <polyline points="0,12 22,11 44,13 66,9 88,10 110,8 132,7 154,6 176,5 198,4 220,3"
+                      stroke="#34d399" stroke-width="1.5" fill="none"/>
+                  </svg>
+                </div>
+              </div>
+              <div class="ht-card">
+                <span class="l">AVG SPRINT · 30D</span>
+                <span class="v">37m median</span>
+                <span class="vsub">p50 37m · p95 62m · trend ↘ (faster)</span>
+                <div class="gline">
+                  <svg viewBox="0 0 220 20" preserveAspectRatio="none">
+                    <polyline points="0,4 22,5 44,6 66,7 88,9 110,8 132,10 154,12 176,11 198,13 220,14"
+                      stroke="#a78bfa" stroke-width="1.5" fill="none"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+            <div class="ht-link">FULL TREND DASHBOARD · Settings → Health →</div>
+
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WHAT THIS COCKPIT ANSWERS AT A GLANCE</span>
+            <ul>
+              <li>"How much have I spent total on this project?" → <strong>Lifetime $342.16</strong> (hero + rail)</li>
+              <li>"How much today?" → <strong>$4.21 · +18% vs yesterday</strong></li>
+              <li>"How much this week?" → <strong>$24.80 · -12% vs last wk</strong></li>
+              <li>"Daily burn rate?" → <strong>$5.92/day · 7d avg</strong></li>
+              <li>"Am I about to die on weekly quota?" → <strong>84% used · est empty Thu 6pm</strong></li>
+              <li>"Is my pipeline healthy?" → <strong>Tier-1 78% +4pp · LGTM 82% · fail 5.6% +1.2pp ⚠</strong></li>
+              <li>"Where's a regression?" → <strong>SLICE FAIL row glows amber → click → trend</strong></li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">TRADE-OFFS</span>
+            <ul>
+              <li>Hero is now ~3 rows (cost + health + tertiary) — tallest screen element</li>
+              <li>Right rail grows to ~6 segments — scrollable, not stretchable past visible area</li>
+              <li>Daily-burn computation needs lifetime + start-date tracking persisted</li>
+              <li>"Share of weekly / lifetime" rollups assume per-project attribution works (project-id stamped on every Claude session)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Riff on this hybrid.</strong> Tell me what to add, swap, or drop. A few specific knobs you can turn:
+    <ul style="margin: 6px 0 0; padding-left: 20px;">
+      <li><strong>Lifetime origin</strong> — "lifetime" starts when the first sprint runs against this project. Confirm, or do you want a manual "start tracking from" date?</li>
+      <li><strong>Tertiary row default</strong> — I showed it expanded ($/sprint avg, $/PR, TTFP, retry rate, peak ctx, DAG util). Keep expanded, or collapse-by-default with a "more" toggle to keep the hero compact?</li>
+      <li><strong>Hero secondary health row</strong> — six slots feels right. Reorder the priorities? My order: Tier-1 → Avg sprint → Sprints/wk → Slice fail → LGTM → Review iters.</li>
+      <li><strong>Cost sparkline timescale</strong> — last 14 days as shown, or 30 days, or "this week + last week" comparison?</li>
+      <li><strong>Per-project attribution</strong> — for "share of weekly", we need every Claude session to record its project. Confirm we'll stamp that into the per-slice status JSON.</li>
+      <li><strong>Settings → Health page</strong> — anything you want hoisted from there back into the daily cockpit? My current cuts: weekly histograms, per-skill cost breakdowns, per-state retry breakdowns, reviewer/implementer disagreement rate.</li>
+    </ul>
+  </footer>
+
+</div>
+</body>
+</html>

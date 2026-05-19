@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q4 — Sprint state · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .sv {
+      padding: 18px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+
+    /* ── (A) horizontal pill stepper ── */
+    .stepper {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 16px 18px;
+      position: relative;
+    }
+    .step {
+      flex: 1;
+      display: flex; flex-direction: column; align-items: center;
+      position: relative;
+      z-index: 1;
+    }
+    .step .dot {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--bg-3);
+      border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 11px; color: var(--text-3);
+      transition: all 0.4s ease;
+    }
+    .step.done .dot {
+      background: var(--c-accent-2);
+      border-color: var(--c-accent-2);
+      color: #04201a;
+    }
+    .step.current .dot {
+      background: var(--c-accent);
+      border-color: var(--c-accent);
+      color: #052735;
+      box-shadow: 0 0 0 4px rgba(56,189,248,0.15), 0 0 14px rgba(56,189,248,0.5);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .step.failed .dot { background: var(--c-failed); border-color: var(--c-failed); color: #fff; }
+    .step .lbl {
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: var(--text-2);
+      text-transform: uppercase;
+      text-align: center;
+    }
+    .step.current .lbl { color: var(--c-accent); font-weight: 600; }
+    .step.done .lbl { color: var(--text-1); }
+    .step .dur {
+      margin-top: 3px;
+      font-family: var(--mono);
+      font-size: 9.5px;
+      color: var(--text-3);
+    }
+    .step.current .dur { color: var(--c-accent); }
+    .step.done .dur { color: var(--text-2); }
+    /* connectors */
+    .step::after {
+      content: '';
+      position: absolute;
+      top: 14px;
+      left: 50%;
+      width: 100%;
+      height: 2px;
+      background: var(--border);
+      z-index: -1;
+    }
+    .step:last-child::after { display: none; }
+    .step.done::after, .step.current::after { background: var(--c-accent-2); }
+
+    /* sub-rail of slice progress inside the executing step */
+    .sub-rail {
+      margin-top: 4px;
+      display: flex;
+      gap: 2px;
+    }
+    .sub-rail i {
+      width: 11px; height: 5px; border-radius: 1px;
+      background: var(--bg-3);
+    }
+    .sub-rail i.merged { background: var(--c-merged); }
+    .sub-rail i.review { background: var(--c-review); }
+    .sub-rail i.work { background: var(--c-work); }
+    .sub-rail i.pr { background: var(--c-pr); }
+
+    /* failure fork shown muted below */
+    .fork {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 8px;
+      padding: 8px 14px;
+      background: var(--bg-1);
+      border: 1px dashed var(--border-soft);
+      border-radius: 8px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3);
+    }
+    .fork .pf {
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .fork .pf .pd {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--bg-3); border: 1px solid var(--border);
+    }
+    .fork .pf .pd.fail { background: rgba(248,113,113,0.2); border-color: rgba(248,113,113,0.4); }
+    .fork .pf .pd.human { background: rgba(251,146,60,0.2); border-color: rgba(251,146,60,0.4); }
+    .fork .pf .pd.partial { background: rgba(251,191,36,0.2); border-color: rgba(251,191,36,0.4); }
+    .fork .arr { color: var(--text-3); }
+
+    /* aux stat strip under stepper */
+    .aux {
+      display: flex; gap: 12px;
+      padding: 10px 16px;
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-2);
+      align-items: center;
+    }
+    .aux .stat-aux { display: flex; align-items: baseline; gap: 4px; }
+    .aux .stat-aux b { color: var(--text-0); font-size: 12px; }
+    .aux .div { width: 1px; height: 16px; background: var(--border-soft); }
+    .aux .grow { flex: 1; }
+    .aux .eta { color: var(--c-accent); }
+
+    /* ── (B) vertical timeline ── */
+    .tline {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 16px 20px;
+      position: relative;
+    }
+    .tline .spine {
+      position: absolute;
+      top: 24px; bottom: 24px; left: 30px;
+      width: 2px;
+      background: var(--border);
+    }
+    .tevent {
+      position: relative;
+      padding-left: 38px;
+      padding-bottom: 14px;
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+    .tevent:last-child { padding-bottom: 0; }
+    .tevent::before {
+      content: '';
+      position: absolute;
+      left: 23px; top: 4px;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--bg-3);
+      border: 2px solid var(--border);
+      box-sizing: border-box;
+    }
+    .tevent.done::before { background: var(--c-accent-2); border-color: var(--c-accent-2); }
+    .tevent.current::before {
+      background: var(--c-accent); border-color: var(--c-accent);
+      box-shadow: 0 0 0 4px rgba(56,189,248,0.2);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .tevent .head {
+      display: flex; align-items: baseline; gap: 10px;
+    }
+    .tevent .name {
+      color: var(--text-0); font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+    }
+    .tevent.current .name { color: var(--c-accent); }
+    .tevent.done .name { color: var(--text-1); }
+    .tevent .ts { color: var(--text-3); font-size: 10px; }
+    .tevent .dur { color: var(--text-2); font-size: 10px; }
+    .tevent .detail {
+      color: var(--text-2);
+      font-family: var(--sans);
+      font-size: 11.5px;
+      margin-top: 4px;
+    }
+
+    /* ── (C) schematic diagram ── */
+    .schema {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 16px;
+      position: relative;
+      min-height: 280px;
+    }
+    .schema svg { width: 100%; height: 280px; }
+    .schema .legend {
+      position: absolute; top: 14px; right: 16px;
+      display: flex; gap: 12px;
+      font-family: var(--mono); font-size: 10px; color: var(--text-3);
+    }
+    .schema .legend i {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 4px; vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 04 / Sprint state machine</div>
+      <h1>How do we show the sprint's state in motion?</h1>
+      <div class="qsub">
+        Sprint flows through <code>planning → publishing_issues → executing → awaiting_signoff → merging → complete</code>, with branches to <code>failed</code>, <code>partial_failure</code>, <code>merge_blocked</code>. The viz has to read at a glance, surface duration in each state, and animate transitions live.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q3-dashboard.html">← Q3</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — horizontal pill stepper with sub-rail.</strong>
+      Six pills on a rail (one per main state). Current pill pulses, completed ones are solid. Tiny duration under each pill shows time spent. Inside the <code>executing</code> pill, a 1px-tall sub-rail of slice-state cells gives you the live slice shape <em>without leaving the sprint state view</em>. Failure branches collapse into a muted "alternate exits" strip below, only highlighted if the sprint actually hits one.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── Option A: horizontal pill stepper ─────────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Horizontal pill stepper · duration-in-step + slice sub-rail</h2>
+      </div>
+      <div class="option-preview">
+        <div class="sv">
+          <div class="stepper">
+            <div class="step done">
+              <div class="dot">✓</div>
+              <div class="lbl">Planning</div>
+              <div class="dur">12s</div>
+            </div>
+            <div class="step done">
+              <div class="dot">✓</div>
+              <div class="lbl">Publishing</div>
+              <div class="dur">4s</div>
+            </div>
+            <div class="step current">
+              <div class="dot">▶</div>
+              <div class="lbl">Executing</div>
+              <div class="dur">21m · ETA 14m</div>
+              <div class="sub-rail">
+                <i class="merged"></i><i class="merged"></i><i class="review"></i><i class="work"></i><i class="work"></i><i></i><i></i><i></i>
+              </div>
+            </div>
+            <div class="step">
+              <div class="dot">3</div>
+              <div class="lbl">Awaiting sign-off</div>
+              <div class="dur">—</div>
+            </div>
+            <div class="step">
+              <div class="dot">4</div>
+              <div class="lbl">Merging</div>
+              <div class="dur">—</div>
+            </div>
+            <div class="step">
+              <div class="dot">5</div>
+              <div class="lbl">Complete</div>
+              <div class="dur">—</div>
+            </div>
+          </div>
+          <div class="aux">
+            <span class="stat-aux">elapsed <b>21m 14s</b></span>
+            <span class="div"></span>
+            <span class="stat-aux eta">ETA <b style="color: var(--c-accent)">~14m</b></span>
+            <span class="div"></span>
+            <span class="stat-aux">cost <b>$2.41</b></span>
+            <span class="div"></span>
+            <span class="stat-aux">lanes <b>3 / 3</b></span>
+            <span class="div"></span>
+            <span class="stat-aux">slices <b>5 / 8</b></span>
+            <span class="grow"></span>
+            <span style="color: var(--text-3); font-size: 10px;">▢ live · last tick 2s ago</span>
+          </div>
+          <div class="fork">
+            <span style="color: var(--text-3); letter-spacing: 0.1em;">ALTERNATE EXITS</span>
+            <span class="pf"><span class="pd partial"></span>partial_failure</span>
+            <span class="arr">→</span> awaiting_signoff
+            <span class="pf"><span class="pd fail"></span>failed</span>
+            <span class="pf"><span class="pd human"></span>merge_blocked</span>
+            <span class="arr">→</span> human
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">The stepper reads in &lt; 1 second. The sub-rail inside <code>executing</code> shows the active slice shape so you don't have to scroll to slice cards to know the overall pulse. Failure branches stay visible but de-emphasized — they exist for awareness, light up only if hit. ETA derives from mean per-slice duration so far × remaining slice count.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>State + duration + ETA in one rail</li>
+              <li>Slice shape visible inside the state pill</li>
+              <li>Animated pulse = "still alive" signal</li>
+              <li>Failures don't dominate when they're not happening</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Doesn't show the <em>graph</em> structure (loops, retries)</li>
+              <li>Past-state durations are tiny — easy to miss</li>
+              <li>Retries inside a state aren't visible</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option B: vertical timeline ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Vertical timeline · transitions with timestamps</h2>
+      </div>
+      <div class="option-preview">
+        <div class="sv">
+          <div class="tline">
+            <div class="spine"></div>
+            <div class="tevent done">
+              <div class="head"><span class="name">PACKAGE_RECEIVED</span><span class="ts">14:02:11</span><span class="dur">+0s</span></div>
+              <div class="detail">Sprint package committed at <code>.naml/sprints/2026-05-19-html-renderer/</code></div>
+            </div>
+            <div class="tevent done">
+              <div class="head"><span class="name">PLANNING</span><span class="ts">14:02:11</span><span class="dur">12s</span></div>
+              <div class="detail">DAG built · 8 slices · width=3 · pre-flight overlap check passed</div>
+            </div>
+            <div class="tevent done">
+              <div class="head"><span class="name">PUBLISHING_ISSUES</span><span class="ts">14:02:23</span><span class="dur">4s</span></div>
+              <div class="detail">8 GitHub issues created · labels applied</div>
+            </div>
+            <div class="tevent current">
+              <div class="head"><span class="name" style="font-size: 13px">EXECUTING</span><span class="ts">14:02:27</span><span class="dur">21m 12s and counting</span></div>
+              <div class="detail">3 lanes active · 2 slices merged · 1 in review · 2 in work · 3 pending</div>
+            </div>
+            <div class="tevent">
+              <div class="head"><span class="name">AWAITING_SIGNOFF</span></div>
+            </div>
+            <div class="tevent">
+              <div class="head"><span class="name">MERGING</span></div>
+            </div>
+            <div class="tevent">
+              <div class="head"><span class="name">COMPLETE</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Each transition is logged with exact timestamp, duration in state, and a one-line detail. Reads like a CI build log. Best for post-mortems and audit; less ideal as the always-on live status.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Full traversal history captured</li>
+              <li>Exact timestamps for every transition</li>
+              <li>Detail per state worth keeping</li>
+              <li>Great for replay / debug</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Vertical = tall — eats real estate</li>
+              <li>Slow to read "where am I" — eye has to scan</li>
+              <li>Future states feel hypothetical</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option C: schematic diagram ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Schematic graph · nodes &amp; edges (mirrors design-doc diagram)</h2>
+      </div>
+      <div class="option-preview">
+        <div class="sv">
+          <div class="schema">
+            <div class="legend">
+              <span><i style="background: var(--c-accent-2)"></i>traversed</span>
+              <span><i style="background: var(--c-accent); box-shadow: 0 0 6px var(--c-accent);"></i>current</span>
+              <span><i style="background: var(--bg-3); border: 1px solid var(--border)"></i>possible</span>
+              <span><i style="background: var(--c-failed)"></i>terminal</span>
+            </div>
+            <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#4d5666"/>
+                </marker>
+                <marker id="ar-act" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#34d399"/>
+                </marker>
+              </defs>
+
+              <!-- main flow edges -->
+              <line x1="78" y1="80" x2="155" y2="80" stroke="#34d399" stroke-width="2" marker-end="url(#ar-act)"/>
+              <line x1="240" y1="80" x2="317" y2="80" stroke="#34d399" stroke-width="2" marker-end="url(#ar-act)"/>
+              <line x1="402" y1="80" x2="479" y2="80" stroke="#4d5666" stroke-width="1.5" marker-end="url(#ar)"/>
+              <line x1="564" y1="80" x2="641" y2="80" stroke="#4d5666" stroke-width="1.5" marker-end="url(#ar)"/>
+
+              <!-- failure paths -->
+              <path d="M 359 105 Q 359 160 200 160" stroke="#f87171" stroke-width="1.2" fill="none" marker-end="url(#ar)" stroke-dasharray="4 3" opacity="0.5"/>
+              <text x="240" y="155" fill="#7c8696" font-family="ui-monospace, monospace" font-size="9">partial_failure</text>
+
+              <path d="M 521 105 Q 521 160 420 195" stroke="#fb923c" stroke-width="1.2" fill="none" marker-end="url(#ar)" stroke-dasharray="4 3" opacity="0.5"/>
+              <text x="440" y="190" fill="#7c8696" font-family="ui-monospace, monospace" font-size="9">merge_blocked → human</text>
+
+              <line x1="120" y1="105" x2="120" y2="195" stroke="#f87171" stroke-width="1.2" stroke-dasharray="4 3" opacity="0.5" marker-end="url(#ar)"/>
+              <text x="130" y="200" fill="#7c8696" font-family="ui-monospace, monospace" font-size="9">failed</text>
+
+              <!-- nodes -->
+              <g>
+                <rect x="20" y="58" width="60" height="44" rx="6" fill="#1f2733" stroke="#34d399" stroke-width="1.5"/>
+                <text x="50" y="80" fill="#e7ecf3" font-family="ui-monospace, monospace" font-size="10" text-anchor="middle">planning</text>
+                <text x="50" y="93" fill="#7c8696" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">12s</text>
+              </g>
+
+              <g>
+                <rect x="160" y="58" width="80" height="44" rx="6" fill="#1f2733" stroke="#34d399" stroke-width="1.5"/>
+                <text x="200" y="80" fill="#e7ecf3" font-family="ui-monospace, monospace" font-size="10" text-anchor="middle">publishing</text>
+                <text x="200" y="93" fill="#7c8696" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">4s</text>
+              </g>
+
+              <g>
+                <rect x="245" y="55" width="75" height="50" rx="7" fill="rgba(56,189,248,0.15)" stroke="#38bdf8" stroke-width="2"/>
+                <text x="283" y="78" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="10.5" text-anchor="middle" font-weight="bold">executing</text>
+                <text x="283" y="92" fill="#38bdf8" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">21m · 5/8</text>
+              </g>
+
+              <g>
+                <rect x="322" y="58" width="80" height="44" rx="6" fill="#15191f" stroke="#2a3342" stroke-width="1"/>
+                <text x="362" y="80" fill="#7c8696" font-family="ui-monospace, monospace" font-size="10" text-anchor="middle">awaiting</text>
+                <text x="362" y="93" fill="#4d5666" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">sign-off</text>
+              </g>
+
+              <g>
+                <rect x="484" y="58" width="80" height="44" rx="6" fill="#15191f" stroke="#2a3342" stroke-width="1"/>
+                <text x="524" y="84" fill="#7c8696" font-family="ui-monospace, monospace" font-size="10" text-anchor="middle">merging</text>
+              </g>
+
+              <g>
+                <rect x="646" y="58" width="80" height="44" rx="6" fill="#15191f" stroke="#2a3342" stroke-width="1"/>
+                <text x="686" y="84" fill="#7c8696" font-family="ui-monospace, monospace" font-size="10" text-anchor="middle">complete</text>
+              </g>
+
+              <!-- failure terminals -->
+              <g opacity="0.5">
+                <rect x="92" y="190" width="56" height="22" rx="4" fill="rgba(248,113,113,0.1)" stroke="#f87171" stroke-width="1"/>
+                <text x="120" y="205" fill="#f87171" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">failed</text>
+              </g>
+              <g opacity="0.5">
+                <rect x="172" y="146" width="76" height="22" rx="4" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="1"/>
+                <text x="210" y="161" fill="#fbbf24" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">partial_failure</text>
+              </g>
+              <g opacity="0.5">
+                <rect x="380" y="184" width="72" height="22" rx="4" fill="rgba(251,146,60,0.1)" stroke="#fb923c" stroke-width="1"/>
+                <text x="416" y="199" fill="#fb923c" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle">merge_blocked</text>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">A real graph: nodes for every state, edges for every transition, including the failure terminals from the design-doc state diagram. The traversed path is solid green; the current state is the lit cyan node; everything else is dim. Closest to how engineers think about state machines.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Full state-machine fidelity</li>
+              <li>Failure exits are visible</li>
+              <li>Engineer-flavored — feels honest</li>
+              <li>Doubles as documentation</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Takes more vertical space</li>
+              <li>Heavier to render &amp; animate</li>
+              <li>Reads slower than a stepper</li>
+              <li>Possibly intimidating to non-engineers</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a sprint state viz.</strong> Reply with <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      A common hybrid: <strong>A as the primary, C as a "view full state machine" expandable</strong>. Stepper on top for live read; click "show diagram" to expand the schematic underneath. Best of both, costs a click. Want that hybrid, or keep it pure A?
+      <br><br>
+      Also: <strong>ETA estimator</strong> — derive from <em>mean per-slice duration so far × remaining slices</em> (simple, drifts when slices vary in size), or from <em>slice-type historical p50</em> (smarter, needs history)? Default to the simple one until we have history?
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
