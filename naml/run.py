@@ -19,12 +19,14 @@ is pre-assigned to a lane, every lane consumes from the same ready set.
 from __future__ import annotations
 
 import logging
+import os
+import shutil
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .config import NamlConfig
+from .config import Gate, NamlConfig
 from . import lane as lane_mod
 from .package import Sprint
 from . import project_state as project_state_mod
@@ -36,6 +38,10 @@ from .scheduler import (
 )
 from . import state as state_mod
 from . import states
+
+
+class GatePreflightError(RuntimeError):
+    """Raised when one or more gate executables can't be resolved before any lane spawns."""
 
 
 log = logging.getLogger("naml.run")
@@ -51,6 +57,69 @@ class RunReport:
     per_slice_state: dict[str, str]
     aggregate_state: str            # complete | partial_failure | failed | awaiting_signoff
     overlap_findings: list[tuple[str, str, str, str]]
+
+
+def _gate_executable_resolvable(argv0: str) -> tuple[bool, bool]:
+    """Decide whether a gate's argv[0] is plausibly runnable.
+
+    Returns ``(ok, is_warning_only)``.
+
+    Policy (gates run inside slice worktrees, not the orchestrator's cwd):
+    - Basename (no path separators) → PATH lookup with ``shutil.which``.
+    - Absolute path                 → must exist + be executable.
+    - Relative path containing ``/`` → ambiguous; emit a warning, do NOT
+      fail preflight. The orchestrator can't know the worktree layout
+      up front, and many real configs use ``./.venv/bin/<x>`` which only
+      resolves inside the slice worktree.
+    """
+    if not argv0:
+        return False, False
+    p = Path(argv0)
+    if p.is_absolute():
+        return os.access(argv0, os.X_OK) and Path(argv0).is_file(), False
+    if "/" in argv0 or "\\" in argv0:
+        # Relative path with a separator — can't be checked from here.
+        return True, True
+    return shutil.which(argv0) is not None, False
+
+
+def preflight_gates(gates: Iterable[Gate]) -> None:
+    """Verify each gate's ``argv[0]`` resolves to a runnable executable.
+
+    Raises ``GatePreflightError`` with a message listing **every** unrunnable
+    gate so the user can fix the config in one shot. Relative-path argv[0]s
+    (containing a ``/``) are warned about via the module logger but never
+    abort preflight — they may resolve only inside a slice worktree.
+    """
+    broken: list[Gate] = []
+    for gate in gates:
+        if not gate.argv:
+            broken.append(gate)
+            continue
+        ok, warn_only = _gate_executable_resolvable(gate.argv[0])
+        if warn_only:
+            log.warning(
+                "gate %r: argv[0]=%r is a relative path; runnability will be "
+                "checked inside each slice worktree",
+                gate.name, gate.argv[0],
+            )
+            continue
+        if not ok:
+            broken.append(gate)
+
+    if not broken:
+        return
+
+    lines = ["the following gates cannot be run on this machine:"]
+    for gate in broken:
+        argv_repr = " ".join(gate.argv) if gate.argv else "<empty argv>"
+        lines.append(f"  - {gate.name}: {argv_repr}")
+    lines.append(
+        "fix the [[gates]] argv in .naml/config.toml so each gate's first "
+        "element resolves on PATH (e.g. 'python3' instead of 'python') or "
+        "points to an existing absolute path."
+    )
+    raise GatePreflightError("\n".join(lines))
 
 
 def _resolve_log_root(cfg: NamlConfig) -> Path:
@@ -136,6 +205,12 @@ def run_sprint(
             "config repo %s != sprint target_repo %s — using sprint's value",
             cfg.repo, sprint.target_repo,
         )
+
+    # Fail fast before any lane worker spawns if a gate is misconfigured.
+    # This is the single most common "wasted hour" failure mode (a missing
+    # binary like ``python`` is only discovered on the first gate run, after
+    # the agent has already done its work).
+    preflight_gates(cfg.gates)
 
     project_naml = project_state_mod.naml_dir_for(cfg)
     project_state_mod.on_sprint_start(project_naml, sprint.id)
