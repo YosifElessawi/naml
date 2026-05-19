@@ -1,0 +1,513 @@
+/* Dashboard view — Q3 (Option A) + Q7b hero recommendation.
+   Tokens (--c-work, --c-pr, --bg-1, etc.) come from styles/tokens.css. */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  color: var(--text-0, #e7ecf3);
+  font-family: var(--sans, -apple-system, system-ui, sans-serif);
+}
+
+/* ───── HERO ───── */
+
+.hero {
+  background: linear-gradient(180deg, var(--bg-2, #151b24), var(--bg-1, #0f131a));
+  border: 1px solid var(--border, #2a3342);
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.heroTop {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.projectName {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-0, #e7ecf3);
+}
+
+.projectState {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  margin-left: 8px;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--c-accent, #38bdf8);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 999px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+}
+
+.projectStateDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-accent, #38bdf8);
+  box-shadow: 0 0 5px var(--c-accent, #38bdf8);
+}
+
+.projectSub {
+  margin-top: 4px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: var(--text-2, #7c8696);
+}
+
+.burnLine {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--text-3, #4d5666);
+  text-align: right;
+}
+
+.burnLine strong {
+  color: var(--text-0, #e7ecf3);
+  font-weight: 600;
+}
+
+/* primary cost cluster — 4 big stats */
+.primaryCost {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-0, #0a0d12);
+  border: 1px solid var(--border-soft, #1f2733);
+  border-radius: 8px;
+}
+
+.pStat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-right: 14px;
+  border-right: 1px solid var(--border-soft, #1f2733);
+}
+
+.pStat:last-child {
+  border-right: none;
+  padding-right: 0;
+}
+
+.pStatLabel {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3, #4d5666);
+}
+
+.pStatValue {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-0, #e7ecf3);
+}
+
+.pStatValueLifetime {
+  color: var(--c-accent, #38bdf8);
+}
+
+.pStatSub {
+  display: flex;
+  gap: 8px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  color: var(--text-2, #7c8696);
+}
+
+.pStatDelta {
+  color: var(--c-accent-2, #34d399);
+}
+
+.pStatDeltaUp {
+  color: var(--c-warn, #fbbf24);
+}
+
+/* secondary health row */
+.healthRow {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.healthRowTertiary {
+  opacity: 0.85;
+}
+
+.healthStat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-soft, #1f2733);
+}
+
+.healthStatAlert {
+  border-left-color: var(--c-warn, #fbbf24);
+}
+
+.healthLabel {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3, #4d5666);
+}
+
+.healthValue {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-0, #e7ecf3);
+}
+
+.healthValueOk {
+  color: var(--c-accent-2, #34d399);
+}
+
+.healthValueWarn {
+  color: var(--c-warn, #fbbf24);
+}
+
+.healthValueDanger {
+  color: var(--c-failed, #f87171);
+}
+
+.healthTrend {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9px;
+  color: var(--text-3, #4d5666);
+}
+
+.healthTrendUp {
+  color: var(--c-accent-2, #34d399);
+}
+
+.healthTrendDn {
+  color: var(--c-failed, #f87171);
+}
+
+/* ───── DASH GRID (timeline + sidecar) ───── */
+
+.dashGrid {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 14px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 2px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-3, #4d5666);
+}
+
+.sectionCount {
+  padding: 1px 6px;
+  background: rgba(56, 189, 248, 0.1);
+  color: var(--c-accent, #38bdf8);
+  border-radius: 4px;
+  letter-spacing: 0;
+}
+
+/* ───── SPRINT ROW ───── */
+
+.sprintRow {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  background: var(--bg-1, #0f131a);
+  border: 1px solid var(--border-soft, #1f2733);
+  border-radius: 8px;
+  font-family: var(--sans, system-ui, sans-serif);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    transform 0.15s;
+}
+
+.sprintRow:hover {
+  border-color: var(--border, #2a3342);
+}
+
+.sprintRow:focus-visible {
+  outline: 2px solid var(--c-accent, #38bdf8);
+  outline-offset: 2px;
+}
+
+.sprintRowActive {
+  background: linear-gradient(90deg, rgba(56, 189, 248, 0.06), var(--bg-1, #0f131a) 30%);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.sprintMini {
+  display: flex;
+  gap: 2px;
+}
+
+.sprintMiniCell {
+  width: 14px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--bg-3, #1c2330);
+}
+
+.sprintMiniCell.work {
+  background: var(--c-work, #38bdf8);
+}
+
+.sprintMiniCell.pr {
+  background: var(--c-pr, #a78bfa);
+}
+
+.sprintMiniCell.review {
+  background: var(--c-review, #fbbf24);
+}
+
+.sprintMiniCell.merged {
+  background: var(--c-merged, #34d399);
+}
+
+.sprintMiniCell.failed {
+  background: var(--c-failed, #f87171);
+}
+
+.sprintMiniCell.idle {
+  background: var(--c-blocked, #94a3b8);
+  opacity: 0.45;
+}
+
+.sprintMiniCell.blocked {
+  background: var(--c-blocked, #94a3b8);
+}
+
+.sprintMiniCell.human {
+  background: var(--c-human, #fb923c);
+}
+
+.sprintTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sprintTitleText {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--text-0, #e7ecf3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sprintTitleSuffix {
+  margin-left: 6px;
+  font-size: 9px;
+  color: var(--text-3, #4d5666);
+}
+
+.sprintSubtitle {
+  font-size: 10px;
+  color: var(--text-3, #4d5666);
+}
+
+.sprintPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+}
+
+.pillExecuting {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--c-accent, #38bdf8);
+}
+
+.pillSignoff {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--c-warn, #fbbf24);
+}
+
+.pillComplete {
+  background: rgba(52, 211, 153, 0.15);
+  color: var(--c-accent-2, #34d399);
+}
+
+.pillPlanned {
+  background: var(--bg-3, #1c2330);
+  color: var(--text-2, #7c8696);
+  border: 1px solid var(--border-soft, #1f2733);
+}
+
+.pillFailed {
+  background: rgba(248, 113, 113, 0.15);
+  color: var(--c-failed, #f87171);
+}
+
+.sprintMeta {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--text-2, #7c8696);
+  text-align: right;
+  line-height: 1.5;
+}
+
+.sprintMeta strong {
+  font-weight: 600;
+  color: var(--text-0, #e7ecf3);
+}
+
+.sprintOpen {
+  padding: 4px 8px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 5px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--c-accent, #38bdf8);
+}
+
+/* ───── INBOX SIDECAR ───── */
+
+.inbox {
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-1, #0f131a);
+  border: 1px solid var(--border-soft, #1f2733);
+  border-radius: 10px;
+}
+
+.inboxHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--text-3, #4d5666);
+}
+
+.inboxCount {
+  padding: 1px 6px;
+  border-radius: 4px;
+  letter-spacing: 0;
+  background: var(--bg-3, #1c2330);
+  color: var(--text-2, #7c8696);
+}
+
+.inboxCountWarn {
+  background: rgba(251, 191, 36, 0.1);
+  color: var(--c-warn, #fbbf24);
+}
+
+.inboxBullet {
+  padding: 6px 8px;
+  background: var(--bg-2, #151b24);
+  border-left: 2px solid var(--c-warn, #fbbf24);
+  border-radius: 0 4px 4px 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-1, #b9c2cf);
+}
+
+.inboxBulletSource {
+  display: block;
+  margin-top: 3px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9px;
+  color: var(--text-3, #4d5666);
+}
+
+.inboxLink {
+  padding: 5px 0;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  color: var(--c-accent, #38bdf8);
+  text-align: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.inboxLink:hover {
+  color: var(--text-0, #e7ecf3);
+}
+
+/* ───── RESPONSIVE: sidecar tucks below at < 1100px viewport ───── */
+
+@media (max-width: 1100px) {
+  .dashGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .primaryCost {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .healthRow {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .pStat {
+    border-right: none;
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .heroTop {
+    grid-template-columns: 1fr;
+  }
+
+  .burnLine {
+    text-align: left;
+  }
+
+  .sprintRow {
+    grid-template-columns: 1fr auto;
+    row-gap: 8px;
+  }
+
+  .sprintMini {
+    grid-column: 1 / -1;
+  }
+}
