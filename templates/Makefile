@@ -1,4 +1,23 @@
-# agents-orchestrator — drop this Makefile at the root of any target repo.
+# ============================================================================
+# STALE TEMPLATE — Naml v1 → v2 migration in progress.
+#
+# This Makefile points at the v1 orchestrator entry
+# (`agents_orchestrator/orchestrator.py`). That package was removed in the
+# v1 → v2 collapse. The v2 orchestrator lives under the `naml` Python
+# package and is being implemented in Phase 2 (tracking issue #4):
+# `naml run` / `naml merge` / `naml status` / `naml serve` against the new
+# sprint-package format.
+#
+# Until #4 lands, the targets below WILL NOT WORK. The file is kept on disk
+# so the diff to the v2 Makefile is easy to follow when it ships.
+#
+# What still works today:
+#   python3 -m naml migrate-config   # legacy config → .naml/config.toml
+#   python3 -m naml show-config      # inspect resolved config
+#   python3 -m naml inspect-sprint   # parse a sprint package
+# ============================================================================
+#
+# v1 docs (preserved for reference until Phase 2 rewrites them):
 #
 # `make` with no target runs a SUPERVISED BURST: it works through the queue
 # now, while you watch `make status` and step into any agent with

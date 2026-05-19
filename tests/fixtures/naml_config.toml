@@ -1,0 +1,25 @@
+# V2 .naml/config.toml fixture. Adds [paths] and [lanes] sections.
+
+[repo]
+slug = "owner/example-v2"
+base_branch = "main"
+
+[[gates]]
+name = "lint"
+argv = ["pnpm", "lint"]
+
+[[gates]]
+name = "test"
+argv = ["pnpm", "test"]
+
+[pipeline]
+stop_after = "review"
+auto_review = true
+
+[lanes]
+default = 4
+max = 6
+
+[paths]
+sprints_dir = ".naml/sprints"
+feedback_inbox = "docs/feedback/inbox.md"
