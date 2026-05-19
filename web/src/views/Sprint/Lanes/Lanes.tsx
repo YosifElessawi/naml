@@ -1,12 +1,5 @@
-import type {
-  GanttBlock,
-  GanttGhost,
-  LaneCard,
-  LaneTrack,
-  LanesData,
-  QueueChip,
-} from "./types.ts";
 import { lanesFixture } from "./fixture.ts";
+import type { GanttBlock, GanttGhost, LaneCard, LaneTrack, LanesData, QueueChip } from "./types.ts";
 import "./Lanes.css";
 
 export interface LanesProps {
@@ -32,10 +25,7 @@ function GhostEl({ ghost }: { ghost: GanttGhost }) {
     ? "naml-lanes__ghost naml-lanes__ghost--speculative"
     : "naml-lanes__ghost";
   return (
-    <div
-      className={cls}
-      style={{ left: pct(ghost.leftPct), width: pct(ghost.widthPct) }}
-    >
+    <div className={cls} style={{ left: pct(ghost.leftPct), width: pct(ghost.widthPct) }}>
       <span className="naml-lanes__ghost-id">{ghost.sliceId}</span>
       {ghost.label ? <span>{ghost.label}</span> : null}
     </div>
@@ -44,9 +34,7 @@ function GhostEl({ ghost }: { ghost: GanttGhost }) {
 
 function LaneRow({ track, nowPct }: { track: LaneTrack; nowPct: number }) {
   const trackCls =
-    track.status === "idle"
-      ? "naml-lanes__track naml-lanes__track--idle"
-      : "naml-lanes__track";
+    track.status === "idle" ? "naml-lanes__track naml-lanes__track--idle" : "naml-lanes__track";
   return (
     <div className="naml-lanes__lane-row" data-lane={track.laneId}>
       <div className="naml-lanes__lane-label">{track.laneId}</div>
@@ -147,9 +135,7 @@ function Card({ card }: { card: LaneCard }) {
 
 function ChipEl({ chip }: { chip: QueueChip }) {
   const cls =
-    chip.kind === "ready"
-      ? "naml-lanes__chip naml-lanes__chip--ready"
-      : "naml-lanes__chip";
+    chip.kind === "ready" ? "naml-lanes__chip naml-lanes__chip--ready" : "naml-lanes__chip";
   return (
     <span className={cls} data-kind={chip.kind}>
       <span className="naml-lanes__chip-id">{chip.sliceId}</span>
@@ -164,7 +150,7 @@ export function Lanes({ data = lanesFixture }: LanesProps) {
       <div className="naml-lanes__tag">TIME · gantt by lane</div>
       <div className="naml-lanes__gantt">
         <div className="naml-lanes__gtime" role="presentation">
-          {data.timeAxis.map((label, i) => {
+          {data.timeAxis.map((label) => {
             const isNow = label.toLowerCase().includes("now");
             const isEta = label.toLowerCase().includes("eta");
             const cls = isNow
@@ -173,7 +159,7 @@ export function Lanes({ data = lanesFixture }: LanesProps) {
                 ? "naml-lanes__gtime-tick--eta"
                 : undefined;
             return (
-              <span key={`${label}-${i}`} className={cls}>
+              <span key={label} className={cls}>
                 {label}
               </span>
             );

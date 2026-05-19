@@ -22,9 +22,7 @@ describe("Lanes", () => {
     expect(screen.getByTestId("now-line-lane-1")).toBeInTheDocument();
     expect(screen.getByTestId("now-line-lane-2")).toBeInTheDocument();
     expect(screen.getByTestId("now-line-lane-3")).toBeInTheDocument();
-    expect(screen.getByTestId("now-line-lane-2").getAttribute("style")).toContain(
-      "left: 68%",
-    );
+    expect(screen.getByTestId("now-line-lane-2").getAttribute("style")).toContain("left: 68%");
   });
 
   it("colors gantt blocks by kind (work / review / merged) and renders a ghost past now", () => {
@@ -53,19 +51,11 @@ describe("Lanes", () => {
     expect(container.querySelector(".naml-lanes__card--work")).toBeInTheDocument();
     expect(container.querySelector(".naml-lanes__card--idle")).toBeInTheDocument();
 
-    const workCard = container.querySelector(
-      ".naml-lanes__card--work",
-    ) as HTMLElement;
-    expect(within(workCard).getByText("73%")).toHaveClass(
-      "naml-lanes__meter-value--warn",
-    );
+    const workCard = container.querySelector(".naml-lanes__card--work") as HTMLElement;
+    expect(within(workCard).getByText("73%")).toHaveClass("naml-lanes__meter-value--warn");
 
-    const idleCard = container.querySelector(
-      ".naml-lanes__card--idle",
-    ) as HTMLElement;
-    expect(
-      within(idleCard).getByText(/READY · NEXT SLICE WILL LAND HERE/),
-    ).toBeInTheDocument();
+    const idleCard = container.querySelector(".naml-lanes__card--idle") as HTMLElement;
+    expect(within(idleCard).getByText(/READY · NEXT SLICE WILL LAND HERE/)).toBeInTheDocument();
   });
 
   it("renders queue chips with neutral blocked and green-tinged ready styling", () => {
@@ -76,7 +66,9 @@ describe("Lanes", () => {
     const blocked = container.querySelectorAll('[data-kind="blocked"]');
     expect(ready).toHaveLength(2);
     expect(blocked).toHaveLength(2);
-    ready.forEach((el) => expect(el).toHaveClass("naml-lanes__chip--ready"));
+    for (const el of Array.from(ready)) {
+      expect(el).toHaveClass("naml-lanes__chip--ready");
+    }
     expect(screen.getByText("3 lanes · 2 ready · 2 blocked · 1 idle")).toBeInTheDocument();
   });
 
