@@ -7,14 +7,8 @@ describe("Header", () => {
     render(<Header activeTab="dashboard" onTabChange={() => {}} />);
     const tabs = screen.getAllByRole("tab");
     expect(tabs).toHaveLength(3);
-    expect(screen.getByRole("tab", { name: "Dashboard" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByRole("tab", { name: "Sprint" })).toHaveAttribute(
-      "aria-selected",
-      "false",
-    );
+    expect(screen.getByRole("tab", { name: "Dashboard" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Sprint" })).toHaveAttribute("aria-selected", "false");
   });
 
   it("invokes onTabChange when a tab is clicked", () => {

@@ -37,7 +37,7 @@ export function Header({
   const progress = sprintTotal > 0 ? Math.min(100, (sprintDone / sprintTotal) * 100) : 0;
 
   return (
-    <header className={styles.hdr} role="banner">
+    <header className={styles.hdr}>
       <span className={styles.logo} aria-label="naml">
         ▟ naml
       </span>

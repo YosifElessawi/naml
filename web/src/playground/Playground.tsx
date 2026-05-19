@@ -15,9 +15,8 @@ export function Playground() {
       <div>
         <h1 className={styles.title}>naml cockpit · component playground</h1>
         <p className={styles.lede}>
-          Each shell piece in isolation — useful for tuning visual fidelity against the
-          mockups without booting the rest of the app. Open via{" "}
-          <code>#/playground</code>.
+          Each shell piece in isolation — useful for tuning visual fidelity against the mockups
+          without booting the rest of the app. Open via <code>#/playground</code>.
         </p>
       </div>
 

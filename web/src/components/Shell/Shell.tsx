@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import { type Route, useRoute } from "../../router/router.ts";
 import { Header, type HeaderTab } from "../Header/Header.tsx";
 import { RightRail } from "../RightRail/RightRail.tsx";
-import { type Route, useRoute } from "../../router/router.ts";
 import styles from "./Shell.module.css";
 
 function routeToTab(route: Route): HeaderTab {
@@ -35,8 +35,7 @@ function MainPane({ route }: { route: Route }) {
           <span className={styles.routeTag}>DASHBOARD</span>
           <h1>Dashboard</h1>
           <p>
-            Project hero + cost cluster + health row land in slice-3. This is the route
-            placeholder.
+            Project hero + cost cluster + health row land in slice-3. This is the route placeholder.
           </p>
         </section>
       );
@@ -46,8 +45,7 @@ function MainPane({ route }: { route: Route }) {
           <span className={styles.routeTag}>SPRINT</span>
           <h1>Sprint · {route.sprintId}</h1>
           <p>
-            Sprint header, lanes, and slice grid land in slices 4–6. This is the route
-            placeholder.
+            Sprint header, lanes, and slice grid land in slices 4–6. This is the route placeholder.
           </p>
         </section>
       );
@@ -84,10 +82,7 @@ export function Shell() {
   return (
     <div className={styles.shell}>
       <div className={styles.header}>
-        <Header
-          activeTab={routeToTab(route)}
-          onTabChange={(tab) => navigate(tabToRoute(tab))}
-        />
+        <Header activeTab={routeToTab(route)} onTabChange={(tab) => navigate(tabToRoute(tab))} />
       </div>
       <main className={styles.main} tabIndex={-1}>
         <MainPane route={route} />
