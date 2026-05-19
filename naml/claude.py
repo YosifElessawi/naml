@@ -28,14 +28,17 @@ _IMPLEMENTER_ALLOWED_TOOLS: tuple[str, ...] = (
     "Read", "Write", "Edit", "MultiEdit", "NotebookEdit",
     "Bash(*)",
     # User settings.json "ask" patterns commonly cover these — declare
-    # explicitly so the more-specific-pattern-wins rule grants them.
+    # both the no-space form (which beats a generic Bash(*) deny) and the
+    # exact with-space match for the common user "ask" rule. Per-session
+    # allowedTools beats settings.json ask when patterns match by shape.
+    "Bash(git commit *)",
     "Bash(git commit*)",
     "Bash(git commit --*)",
     "Bash(git commit -*)",
-    "Bash(git merge*)",
-    "Bash(git rebase*)",
-    "Bash(git cherry-pick*)",
-    "Bash(git revert*)",
+    "Bash(git merge *)", "Bash(git merge*)",
+    "Bash(git rebase *)", "Bash(git rebase*)",
+    "Bash(git cherry-pick *)", "Bash(git cherry-pick*)",
+    "Bash(git revert *)", "Bash(git revert*)",
     "Glob", "Grep",
     "WebFetch", "WebFetch(*)", "WebSearch",
     "Task", "TodoWrite",
