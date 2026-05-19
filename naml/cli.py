@@ -5,6 +5,8 @@ Surface:
 - ``naml migrate-config [--dry-run] [--root PATH]``
 - ``naml show-config [--root PATH]``
 - ``naml inspect-sprint <sprint-dir>``
+- ``naml status``              — print the project + current sprint + slice
+                                  hierarchy (same payload as /api/state)
 - ``naml run <sprint-dir>``    — execute a sprint package
 - ``naml merge <sprint-dir>``  — walk review-clean slices through the
                                   4-tier merge pipeline (Phase 4 / MVP)
@@ -93,6 +95,20 @@ def _cmd_inspect_sprint(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_status(args: argparse.Namespace) -> int:
+    from . import project_state as project_state_mod
+
+    try:
+        cfg = load_config(Path(args.root) if args.root else None)
+    except ConfigError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    payload = project_state_mod.build_hierarchy(cfg)
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
 def _cmd_show_config(args: argparse.Namespace) -> int:
     try:
         cfg = load_config(Path(args.root) if args.root else None)
@@ -142,6 +158,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_show.add_argument("--root", help="start directory for config discovery")
     p_show.set_defaults(func=_cmd_show_config)
+
+    p_status = sub.add_parser(
+        "status",
+        help="print project + current sprint + slice hierarchy as JSON",
+    )
+    p_status.add_argument("--root", help="config root (default: cwd or walked up)")
+    p_status.set_defaults(func=_cmd_status)
 
     p_insp = sub.add_parser(
         "inspect-sprint",
