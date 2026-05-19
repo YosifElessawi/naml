@@ -110,11 +110,24 @@ def has_merge_conflict(branch: str, *, cwd: Path, base_branch: str) -> bool:
 
 # --- worktree ------------------------------------------------------------
 
-def worktree_add(target_path: Path, *, repo_root: Path, base_branch: str) -> None:
+def worktree_add(
+    target_path: Path,
+    *,
+    repo_root: Path,
+    base_branch: str,
+    symlinks: tuple[str, ...] | list[str] = (),
+) -> None:
     """Create a detached-HEAD worktree at ``target_path`` based on origin/<base>.
 
     The worktree starts on origin/<base>; the lane worker will then cut
     its slice branch off this position.
+
+    ``symlinks`` is a list of repo-root-relative paths to symlink into the
+    fresh worktree (e.g. ``[".venv"]``). Entries that don't exist at the
+    source are silently skipped — the default list is safe on projects
+    that don't have a ``.venv``. Existing entries in the worktree (which
+    can happen if a previous run left state behind) are removed and
+    re-linked.
     """
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if target_path.exists():
@@ -128,6 +141,24 @@ def worktree_add(target_path: Path, *, repo_root: Path, base_branch: str) -> Non
         f"origin/{base_branch}",
         cwd=repo_root,
     )
+    for rel in symlinks:
+        rel = rel.strip()
+        if not rel:
+            continue
+        src = (repo_root / rel).resolve()
+        if not src.exists():
+            continue
+        link_path = target_path / rel
+        # Remove anything in the way (a stale symlink or a tracked file with
+        # the same name would block ln). Tracked files take precedence —
+        # don't clobber them.
+        if link_path.is_symlink():
+            link_path.unlink()
+        elif link_path.exists():
+            # The repo actually tracks this path; respect git's copy.
+            continue
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        link_path.symlink_to(src)
 
 
 def worktree_remove(target_path: Path, *, repo_root: Path) -> None:

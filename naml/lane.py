@@ -195,6 +195,7 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
             worktree,
             repo_root=cfg.repo_root,
             base_branch=cfg.base_branch,
+            symlinks=cfg.worktree_symlinks,
         )
         branch = _branch_name_for(sprint.id, slice_id)
         gitops.create_branch_from_base(
