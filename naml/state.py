@@ -29,6 +29,7 @@ STATE_DIRNAME = "state"
 SUMMARY_FILENAME = "{slice_id}.summary.md"
 STATUS_FILENAME = "{slice_id}.status.json"
 SPRINT_STATE_FILENAME = "sprint.json"
+MERGE_LOG_FILENAME = "merge-log.json"
 
 
 def _now_iso() -> str:
@@ -307,3 +308,77 @@ def read_summary(sprint_root: Path, slice_id: str) -> str:
         return p.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+# --- merge log -----------------------------------------------------------
+#
+# A simple append-only JSON array of per-slice merge attempts. Each entry
+# records which tier won, how long it took, what happened. Used by the
+# CLI report and the (future) dashboard. Lives next to ``sprint.json`` at
+# ``state/merge-log.json``.
+
+
+@dataclass
+class MergeLogEntry:
+    """One merge attempt for one slice."""
+
+    slice_id: str
+    pr_url: str
+    branch: str
+    tier: int                  # 1 | 2 | 3 | 4
+    success: bool
+    detail: str
+    started_at: str            # ISO 8601 UTC
+    finished_at: str           # ISO 8601 UTC
+    duration_seconds: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def merge_log_path(sprint_root: Path) -> Path:
+    return state_dir(sprint_root) / MERGE_LOG_FILENAME
+
+
+def load_merge_log(sprint_root: Path) -> list[MergeLogEntry]:
+    p = merge_log_path(sprint_root)
+    if not p.is_file():
+        return []
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[MergeLogEntry] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            out.append(
+                MergeLogEntry(
+                    slice_id=str(item["slice_id"]),
+                    pr_url=str(item.get("pr_url", "")),
+                    branch=str(item.get("branch", "")),
+                    tier=int(item.get("tier", 0)),
+                    success=bool(item.get("success", False)),
+                    detail=str(item.get("detail", "")),
+                    started_at=str(item.get("started_at", "")),
+                    finished_at=str(item.get("finished_at", "")),
+                    duration_seconds=float(item.get("duration_seconds", 0.0)),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def append_merge_log(sprint_root: Path, entry: MergeLogEntry) -> None:
+    """Append-only write of one merge attempt. Atomic via tmp-rename."""
+    existing = load_merge_log(sprint_root)
+    existing.append(entry)
+    ensure_state_dir(sprint_root)
+    _atomic_write_text(
+        merge_log_path(sprint_root),
+        json.dumps([e.to_dict() for e in existing], indent=2) + "\n",
+    )

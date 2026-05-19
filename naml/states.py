@@ -17,6 +17,7 @@ SETUP: Final = "setup"
 WORK: Final = "work"
 PR: Final = "pr"
 REVIEW: Final = "review"
+MERGING: Final = "merging"            # Phase 4 — slice is in the tiered merge pipeline
 MERGED: Final = "merged"
 
 # Terminals (failure / pause).
@@ -25,6 +26,7 @@ NEEDS_INFO: Final = "needs_info"
 NEEDS_HUMAN_REVIEW: Final = "needs_human_review"
 ABANDONED: Final = "abandoned"
 BLOCKED_UPSTREAM: Final = "blocked_upstream"
+MERGE_BLOCKED: Final = "merge_blocked"  # Phase 4 — Tier 4 escalation
 
 # Phase 3 milestone — the slice has cleared auto-review but the sprint has
 # not been merged yet. The scheduler treats this as "done" so it can
@@ -33,9 +35,10 @@ REVIEW_PASSED: Final = "review_passed"
 
 
 SliceState = Literal[
-    "pending", "setup", "work", "pr", "review", "review_passed", "merged",
+    "pending", "setup", "work", "pr", "review", "review_passed",
+    "merging", "merged",
     "failed", "needs_info", "needs_human_review", "abandoned",
-    "blocked_upstream",
+    "blocked_upstream", "merge_blocked",
 ]
 
 # States that count as "the lane is done with this slice, scheduler may
@@ -47,6 +50,7 @@ LANE_DONE_STATES: Final[frozenset[str]] = frozenset({
 
 LANE_FAILED_STATES: Final[frozenset[str]] = frozenset({
     FAILED, NEEDS_HUMAN_REVIEW, ABANDONED, NEEDS_INFO, BLOCKED_UPSTREAM,
+    MERGE_BLOCKED,
 })
 
 

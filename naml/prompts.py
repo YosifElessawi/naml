@@ -143,6 +143,110 @@ End your final message with "DONE:" once the fix is committed, or \
 "BLOCKED:" with a question if you cannot proceed."""
 
 
+def merger_prompt(
+    *,
+    sprint: Sprint,
+    slice_: Slice,
+    branch: str,
+    base_branch: str,
+    conflict_files: list[str],
+    upstream_summaries: dict[str, str],
+    all_slice_summaries: dict[str, str],
+    review_text: str,
+    gates_summary: str,
+) -> str:
+    """Prompt for the Tier-3 merger agent.
+
+    The agent is in the slice's worktree on ``branch``, with an in-progress
+    rebase onto ``origin/<base_branch>`` paused at conflicts that the
+    scripted resolvers couldn't handle. We hand it:
+
+    - The slice spec (so it knows *intent*, not just diff lines)
+    - All upstream summaries and a global view of every sibling slice's
+      summary (so it can see how its change fits the broader sprint)
+    - The reviewer's verdict text (in case the conflict touches a
+      reviewer-flagged area)
+    - The current gate output (to inform "is this safe to commit?")
+    - The list of conflicted files
+
+    The agent's job: resolve the conflicts in place, stage them, then
+    ``git rebase --continue`` until the rebase finishes. Do NOT push,
+    do NOT merge — naml re-runs gates and finishes the merge afterward.
+    """
+    upstream = _format_upstream_summaries(upstream_summaries)
+    siblings_block = (
+        "\n".join(
+            f"### Sibling slice — {sid}\n\n{body.strip()}"
+            for sid, body in all_slice_summaries.items()
+            if sid != slice_.id
+        )
+        or "(no other slices have summaries on file)"
+    )
+    conflicts_block = (
+        "\n".join(f"- `{f}`" for f in conflict_files)
+        if conflict_files else "(none reported by git — investigate)"
+    )
+
+    return f"""You are the MERGER agent for sprint ``{sprint.id}`` in \
+{sprint.target_repo}. Naml's scripted resolvers couldn't fully handle a \
+rebase conflict on slice ``{slice_.id}``; the rebase is paused inside \
+your worktree.
+
+You are NOT the original implementer. You are a fresh, second-opinion \
+agent whose only job is to resolve the conflicts and let the rebase \
+finish. Once you do, naml takes over to re-run gates and finalize the \
+merge — you do not push, you do not merge, you do not open PRs.
+
+## Sprint overview
+
+{sprint.overview.strip()}
+
+## This slice — {slice_.id}: {slice_.title}
+
+{slice_.prompt_body.strip()}
+
+{upstream}## Sibling slices in this sprint (for cross-cutting context)
+
+{siblings_block}
+
+## Reviewer verdict on this slice
+
+{review_text or '(none captured)'}
+
+## Conflict state
+
+Branch: ``{branch}``
+Base:   ``{base_branch}``
+
+Conflict files reported by git:
+
+{conflicts_block}
+
+## Gate output (from the last attempt)
+
+{gates_summary.strip() or '(no gate output yet — gates not yet re-run after the rebase)'}
+
+## Working contract
+
+1. Inspect each conflict file. The change reflects what THIS slice was
+   meant to do; the base side reflects what other recently-merged work
+   did. Preserve BOTH intents where possible.
+2. Use ``git status``, ``git diff``, ``Read``, and ``Edit`` to inspect and
+   fix files. Use ``Bash(git add ...)`` to stage your resolution. After
+   every file is resolved, run ``Bash(git rebase --continue)``. If the
+   continue surfaces NEW conflicts in later commits, repeat the process.
+3. Do NOT abandon the rebase (``git rebase --abort``). Do NOT push.
+   Do NOT touch other branches.
+4. If you genuinely cannot resolve a conflict without a human decision
+   (e.g. two semantically incompatible behaviors), end with:
+       BLOCKED: <one-line description>
+   naml will surface this on the PR for the human.
+5. If the rebase completes successfully, end with:
+       DONE: <one-line summary of how you resolved the conflicts>
+
+Begin now."""
+
+
 def reviewer_prompt(
     *,
     sprint: Sprint,

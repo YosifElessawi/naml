@@ -300,6 +300,89 @@ def pr_diff(branch: str, *, cwd: Path, repo: str) -> str:
     return _run(["gh", "pr", "diff", branch, "--repo", repo], cwd=cwd)
 
 
+def pr_state(branch: str, *, cwd: Path, repo: str) -> str:
+    """Return the state of the open PR for ``branch``: OPEN/CLOSED/MERGED/UNKNOWN."""
+    pr = find_open_pr(branch, cwd=cwd, repo=repo)
+    if pr is not None:
+        return "OPEN"
+    out = _run(
+        ["gh", "pr", "list", "--repo", repo, "--state", "all",
+         "--head", branch, "--json", "state", "--limit", "1"],
+        cwd=cwd,
+    )
+    if not out.strip():
+        return "UNKNOWN"
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return "UNKNOWN"
+    if not data:
+        return "UNKNOWN"
+    return str(data[0].get("state", "UNKNOWN"))
+
+
+class RebaseConflict(GitError):
+    """Raised when ``git rebase`` left conflicts to resolve.
+
+    The merger's Tier 2 + 3 logic catches this specifically and feeds the
+    conflicted files to the resolvers / Tier-3 agent. Other errors flow
+    through as plain ``GitError``.
+    """
+
+    def __init__(self, message: str, conflicts: list[str]) -> None:
+        super().__init__(message)
+        self.conflicts = conflicts
+
+
+def rebase_onto(base_ref: str, *, cwd: Path) -> None:
+    """Rebase the current branch onto ``base_ref`` (e.g. ``origin/main``).
+
+    Raises :class:`RebaseConflict` (a subclass of ``GitError``) if rebase
+    pauses on conflicts. Files are listed in ``exc.conflicts``. Any other
+    failure raises plain ``GitError`` with stderr.
+    """
+    result = subprocess.run(  # noqa: S603
+        ["git", "rebase", base_ref],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return
+    # Detect conflict state by querying git itself; stderr parsing is brittle.
+    conflicted = _run(
+        ["git", "diff", "--name-only", "--diff-filter=U"],
+        cwd=cwd,
+    ).strip().splitlines()
+    if conflicted:
+        raise RebaseConflict(
+            f"rebase paused on conflicts in {len(conflicted)} file(s)",
+            conflicts=[line.strip() for line in conflicted if line.strip()],
+        )
+    raise GitError(
+        f"git rebase {base_ref} (cwd={cwd}) exited {result.returncode}\n"
+        f"{result.stderr.strip()}"
+    )
+
+
+def rebase_abort(*, cwd: Path) -> None:
+    """Abort an in-progress rebase. Tolerates 'no rebase in progress'."""
+    try:
+        git("rebase", "--abort", cwd=cwd)
+    except GitError:
+        # If no rebase is in progress, git exits non-zero — that's fine.
+        pass
+
+
+def merge_pr_squash(branch: str, *, cwd: Path, repo: str) -> None:
+    """``gh pr merge --squash --delete-branch`` for ``branch``."""
+    _run(
+        ["gh", "pr", "merge", branch,
+         "--repo", repo, "--squash", "--delete-branch"],
+        cwd=cwd,
+    )
+
+
 def pr_comment(branch: str, body: str, *, cwd: Path, repo: str) -> None:
     _run(["gh", "pr", "comment", branch, "--repo", repo, "--body", body], cwd=cwd)
 

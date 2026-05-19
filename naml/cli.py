@@ -5,9 +5,9 @@ Surface:
 - ``naml migrate-config [--dry-run] [--root PATH]``
 - ``naml show-config [--root PATH]``
 - ``naml inspect-sprint <sprint-dir>``
-- ``naml run <sprint-dir>``  — execute a sprint package (Phase 2)
-
-Phase 3 (issue #5) adds the per-slice review state and ``naml merge``.
+- ``naml run <sprint-dir>``    — execute a sprint package
+- ``naml merge <sprint-dir>``  — walk review-clean slices through the
+                                  4-tier merge pipeline (Phase 4 / MVP)
 """
 
 from __future__ import annotations
@@ -186,7 +186,73 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.set_defaults(func=_cmd_run)
 
+    p_merge = sub.add_parser(
+        "merge",
+        help="walk review_passed slices through the 4-tier merge pipeline",
+    )
+    p_merge.add_argument("sprint_dir", help="path to a .naml/sprints/<id>/ directory")
+    p_merge.add_argument(
+        "--tier-cap",
+        type=int,
+        choices=[1, 2, 3, 4],
+        default=4,
+        help="stop after this tier even if it fails (1=git-only, 2=+resolvers, "
+             "3=+merger agent, 4=+human escalation). Default: 4.",
+    )
+    p_merge.add_argument(
+        "--root",
+        help="config root (default: cwd or walked up)",
+    )
+    p_merge.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="emit merge progress to stderr",
+    )
+    p_merge.set_defaults(func=_cmd_merge)
+
     return parser
+
+
+def _cmd_merge(args: argparse.Namespace) -> int:
+    from . import merger as merger_mod
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    try:
+        cfg = load_config(Path(args.root) if args.root else None)
+    except ConfigError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        sprint = load_sprint(args.sprint_dir)
+    except SprintError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    report = merger_mod.merge_sprint(sprint, cfg, tier_cap=args.tier_cap)
+
+    payload = {
+        "sprint_id": report.sprint_id,
+        "sprint_state": report.sprint_state,
+        "merged_count": report.merged_count(),
+        "blocked_count": report.blocked_count(),
+        "outcomes": [
+            {
+                "slice_id": o.slice_id,
+                "branch": o.branch,
+                "pr_url": o.pr_url,
+                "tier": o.tier,
+                "success": o.success,
+                "detail": o.detail,
+                "duration_seconds": round(o.duration_seconds, 2),
+            }
+            for o in report.outcomes
+        ],
+    }
+    print(json.dumps(payload, indent=2))
+    # Exit 0 if every attempted slice merged, 1 otherwise.
+    return 0 if report.blocked_count() == 0 else 1
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
