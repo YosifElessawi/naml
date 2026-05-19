@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "naml"
+description = "Sprint-driven orchestrator for Claude Code agents"
+authors = [{ name = "Yosif Elessawi" }]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development",
+]
+# stdlib only — no runtime deps.
+dependencies = []
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/YosifElessawi/naml"
+Issues = "https://github.com/YosifElessawi/naml/issues"
+
+[project.scripts]
+naml = "naml.cli:main"
+
+[tool.hatch.version]
+# Version source: naml/__init__.py's __version__ attribute.
+path = "naml/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["naml"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "naml/",
+  "README.md",
+  "LICENSE",
+  "docs/DESIGN-V2.md",
+]
+exclude = [
+  "naml/__pycache__/",
+  "tests/",
+  "mock-target/",
+]
