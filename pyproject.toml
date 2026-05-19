@@ -18,8 +18,11 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
 ]
-# stdlib only — no runtime deps.
-dependencies = []
+# aiohttp powers the cockpit server (long-lived SSE in slice-11). Everything
+# else is stdlib — keep new runtime deps to a minimum.
+dependencies = [
+  "aiohttp>=3.9",
+]
 dynamic = ["version"]
 
 [project.urls]
@@ -47,4 +50,7 @@ exclude = [
   "naml/__pycache__/",
   "tests/",
   "mock-target/",
+  "web/node_modules/",
+  "web/dist/",
+  "web/.vite/",
 ]

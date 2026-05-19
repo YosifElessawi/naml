@@ -11,3 +11,8 @@ __pycache__/
 
 # Nested playground repo — its own git history lives at GitHub.
 /mock-target/
+
+# Web tier build artifacts
+web/node_modules/
+web/dist/
+web/.vite/
