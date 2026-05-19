@@ -146,6 +146,18 @@ def _record_attempt(status: state_mod.SliceStatus, state_name: str) -> int:
     return next_count
 
 
+def _fresh_session_id(status: state_mod.SliceStatus) -> None:
+    """Always assign a brand-new UUID to ``status.session_id``.
+
+    Reusing the prior naml run's session_id causes Claude to reject the
+    spawn with ``Error: Session ID is already in use`` (the daemon keeps
+    consumed IDs around for the life of the session). In-attempt resume
+    inside one naml run is handled by the work-loop retry logic; across
+    naml-run invocations, every fresh lane attempt MUST get a new ID.
+    """
+    status.session_id = str(uuid.uuid4())
+
+
 def _transition(
     status: state_mod.SliceStatus,
     new_state: str,
@@ -205,9 +217,13 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
         status.worktree = str(worktree)
         status.branch = branch
 
-        # Reset attempts on fresh start.
-        if not status.session_id:
-            status.session_id = str(uuid.uuid4())
+        # Always generate a fresh session_id when a lane claims a slice.
+        # Reusing an old session_id from a previous naml run causes Claude
+        # to reject the spawn with "Session ID already in use". Resume of
+        # partial work within a single attempt is handled by the work-loop
+        # retry; across naml-run invocations, every attempt is a fresh
+        # session.
+        _fresh_session_id(status)
 
         # Compose prompt with upstream summaries.
         upstream = _collect_upstream_summaries(sprint_root, slice_)
