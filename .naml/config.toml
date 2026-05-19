@@ -50,7 +50,12 @@ argv = ["python", "-m", "pytest", "tests/", "-q"]
 
 
 [run]
-cap_minutes = 45
+# Bumped from 45 → 75 for the cockpit sprint: slice-1 stands up Vite +
+# pnpm + aiohttp + gates (heavy), and UI slices iterate on layout +
+# tests. 45 was right for the count-with-filter mock; 75 is the cockpit
+# realistic ceiling. Dial back after the first self-host run if it's
+# wasteful.
+cap_minutes = 75
 max_retries = 2
 
 
