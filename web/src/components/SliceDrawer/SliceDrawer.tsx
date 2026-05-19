@@ -51,7 +51,7 @@ async function defaultIntervene(
 }
 
 export function SliceDrawer({ data, onClose, onIntervene }: SliceDrawerProps) {
-  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const dialogRef = useRef<HTMLDialogElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const [flash, setFlash] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -115,10 +115,10 @@ export function SliceDrawer({ data, onClose, onIntervene }: SliceDrawerProps) {
       onClick={handleOverlayClick}
       data-testid="slice-drawer-overlay"
     >
-      <div
+      <dialog
         ref={dialogRef}
+        open
         className="naml-drawer"
-        role="dialog"
         aria-modal="true"
         aria-labelledby={`naml-drawer-title-${data.id}`}
         data-testid="slice-drawer"
@@ -142,13 +142,12 @@ export function SliceDrawer({ data, onClose, onIntervene }: SliceDrawerProps) {
         {locked ? <GateNote /> : null}
 
         {flash ? (
-          <div
+          <output
             className={`naml-drawer__flash${flash.kind === "error" ? " naml-drawer__flash--error" : ""}`}
-            role="status"
             data-testid="slice-drawer-flash"
           >
             {flash.text}
-          </div>
+          </output>
         ) : null}
 
         <div className="naml-drawer__body" data-testid="slice-drawer-body">
@@ -156,14 +155,12 @@ export function SliceDrawer({ data, onClose, onIntervene }: SliceDrawerProps) {
           {data.acceptance && data.acceptance.length > 0 ? (
             <Acceptance items={data.acceptance} />
           ) : null}
-          {data.traversal && data.traversal.length > 0 ? (
-            <Timeline steps={data.traversal} />
-          ) : null}
+          {data.traversal && data.traversal.length > 0 ? <Timeline steps={data.traversal} /> : null}
           {data.gateOutput ? <GateOutputBlock output={data.gateOutput} /> : null}
           <ReviewBlock data={data} />
           {data.notes ? <NotesBlock notes={data.notes} /> : null}
         </div>
-      </div>
+      </dialog>
     </div>
   );
 }
@@ -188,9 +185,7 @@ function Header({
         </h2>
         <div className="naml-drawer__meta">
           <StatePill state={data.state} />
-          {data.afk ? (
-            <span className="naml-drawer__pill naml-drawer__pill--afk">AFK</span>
-          ) : null}
+          {data.afk ? <span className="naml-drawer__pill naml-drawer__pill--afk">AFK</span> : null}
           {data.hitl ? (
             <span className="naml-drawer__pill naml-drawer__pill--hitl">HITL</span>
           ) : null}
@@ -211,8 +206,7 @@ function Header({
             <>
               <span>·</span>
               <span>
-                sprint{" "}
-                <span style={{ color: "var(--text-0, #e7ecf3)" }}>{data.sprintId}</span>
+                sprint <span style={{ color: "var(--text-0, #e7ecf3)" }}>{data.sprintId}</span>
               </span>
             </>
           ) : null}
@@ -355,10 +349,10 @@ function GateNote() {
         ⚠
       </span>
       <div>
-        <strong>"Open in terminal" is locked while naml owns the session.</strong>{" "}
-        Resuming this slice's Claude session from a separate terminal would yank the
-        conversation out from under the lane worker and corrupt the run. The button unlocks
-        automatically when the slice transitions to a resting state.
+        <strong>"Open in terminal" is locked while naml owns the session.</strong> Resuming this
+        slice's Claude session from a separate terminal would yank the conversation out from under
+        the lane worker and corrupt the run. The button unlocks automatically when the slice
+        transitions to a resting state.
         <div className="naml-drawer__gate-path">
           LOCKED in: <code>setup · work · pr</code> &nbsp;·&nbsp; UNLOCKED in: <b>held</b> ·{" "}
           <b>review</b> · <b>merged</b> · <b>failed</b> · <b>needs_human_review</b> ·{" "}
@@ -372,7 +366,11 @@ function GateNote() {
 function Overview({ data }: { data: SliceDrawerData }) {
   const ctxSev = data.context ? contextSeverity(data.context) : "ok";
   const retrySev =
-    data.retry && data.retry.count > 0 ? (data.retry.count >= data.retry.max ? "red" : "amber") : "ok";
+    data.retry && data.retry.count > 0
+      ? data.retry.count >= data.retry.max
+        ? "red"
+        : "amber"
+      : "ok";
   return (
     <section
       className="naml-drawer__section"
@@ -385,7 +383,11 @@ function Overview({ data }: { data: SliceDrawerData }) {
       </div>
       <div className="naml-drawer__section-body">
         <div className="naml-drawer__ogrid">
-          <Cell k="SESSION ID" v={data.sessionId ? shortenSessionId(data.sessionId) : "—"} copy={data.sessionId} />
+          <Cell
+            k="SESSION ID"
+            v={data.sessionId ? shortenSessionId(data.sessionId) : "—"}
+            copy={data.sessionId}
+          />
           <Cell k="BRANCH" v={data.branch ?? "—"} copy={data.branch} />
           <Cell k="WORKTREE" v={data.worktree ?? "—"} />
           <Cell k="DEPENDS ON" v={data.dependsOn ?? "—"} severity="ok" />

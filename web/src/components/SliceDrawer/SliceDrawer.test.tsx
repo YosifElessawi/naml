@@ -1,23 +1,23 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SliceDrawer, type InterveneAction } from "./SliceDrawer";
-import { drawerFixturesByState, drawerFixtureWork } from "./fixtures";
-import { isTerminalLocked, TERMINAL_LOCKED_STATES, TERMINAL_UNLOCKED_STATES } from "./format";
+import { type InterveneAction, SliceDrawer } from "./SliceDrawer";
+import { drawerFixtureWork, drawerFixturesByState } from "./fixtures";
+import { TERMINAL_LOCKED_STATES, TERMINAL_UNLOCKED_STATES, isTerminalLocked } from "./format";
 import type { InterveneResult, SliceDrawerData, SliceState } from "./types";
 
 const NOOP_INTERVENE = async (): Promise<InterveneResult> => ({ ok: true, status: 200 });
 
-function renderDrawer(opts: {
-  data?: SliceDrawerData;
-  onClose?: () => void;
-  onIntervene?: (id: string, action: InterveneAction) => Promise<InterveneResult>;
-} = {}) {
+function renderDrawer(
+  opts: {
+    data?: SliceDrawerData;
+    onClose?: () => void;
+    onIntervene?: (id: string, action: InterveneAction) => Promise<InterveneResult>;
+  } = {},
+) {
   const onClose = opts.onClose ?? vi.fn();
   const intervene = opts.onIntervene ?? NOOP_INTERVENE;
   const data = opts.data ?? drawerFixtureWork;
-  const utils = render(
-    <SliceDrawer data={data} onClose={onClose} onIntervene={intervene} />,
-  );
+  const utils = render(<SliceDrawer data={data} onClose={onClose} onIntervene={intervene} />);
   return { onClose, intervene, ...utils };
 }
 
