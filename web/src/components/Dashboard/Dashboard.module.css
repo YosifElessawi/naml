@@ -223,8 +223,10 @@
   align-items: baseline;
   gap: 8px;
   margin: 4px 0 2px;
+  padding: 0;
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 10px;
+  font-weight: 400;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-3, #4d5666);
@@ -253,9 +255,7 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition:
-    border-color 0.15s,
-    transform 0.15s;
+  transition: border-color 0.15s, transform 0.15s;
 }
 
 .sprintRow:hover {

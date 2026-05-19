@@ -37,10 +37,7 @@ function Hero({ data }: { data: DashboardData }): JSX.Element {
       <div className={styles.heroTop}>
         <div>
           <span className={styles.projectName}>{project.name}</span>
-          <span
-            className={styles.projectState}
-            aria-label={`Project state: ${project.state}`}
-          >
+          <span className={styles.projectState} aria-label={`Project state: ${project.state}`}>
             <span className={`${styles.projectStateDot} naml-pulse`} />
             {project.state}
           </span>
@@ -50,19 +47,14 @@ function Hero({ data }: { data: DashboardData }): JSX.Element {
           </div>
         </div>
         <div className={styles.burnLine}>
-          ↘ daily burn{" "}
-          <strong>${project.dailyBurn7dAvgDollars.toFixed(2)} avg · 7d</strong>
+          ↘ daily burn <strong>${project.dailyBurn7dAvgDollars.toFixed(2)} avg · 7d</strong>
         </div>
       </div>
 
       <div className={styles.primaryCost} aria-label="Cost timeline">
         <CostStat label="TODAY" slice={cost.today} formatDollars />
         <CostStat label="THIS WEEK" slice={cost.thisWeek} formatDollars />
-        <CostStat
-          label="LAST 30 DAYS"
-          slice={cost.last30d}
-          formatDollars
-        />
+        <CostStat label="LAST 30 DAYS" slice={cost.last30d} formatDollars />
         <CostStat
           label="LIFETIME · PROJECT"
           value={`$${cost.lifetime.dollars.toFixed(2)}`}
@@ -106,22 +98,16 @@ function CostStat({
   formatDollars,
   lifetime,
 }: CostStatProps): JSX.Element {
-  const displayValue =
-    value ?? (slice ? formatCost(slice.dollars, Boolean(formatDollars)) : "—");
+  const displayValue = value ?? (slice ? formatCost(slice.dollars, Boolean(formatDollars)) : "—");
   const subs: string[] = subParts
     ? [...subParts]
     : slice
-      ? [
-          ...(slice.tokens ? [`${slice.tokens} tokens`] : []),
-          ...(slice.delta ? [slice.delta] : []),
-        ]
+      ? [...(slice.tokens ? [`${slice.tokens} tokens`] : []), ...(slice.delta ? [slice.delta] : [])]
       : [];
   return (
     <div className={styles.pStat}>
       <div className={styles.pStatLabel}>{label}</div>
-      <div
-        className={`${styles.pStatValue}${lifetime ? ` ${styles.pStatValueLifetime}` : ""}`}
-      >
+      <div className={`${styles.pStatValue}${lifetime ? ` ${styles.pStatValueLifetime}` : ""}`}>
         {displayValue}
       </div>
       {subs.length > 0 && (
@@ -167,9 +153,7 @@ function HealthStatCell({ stat }: { stat: HealthStat }): JSX.Element {
     .filter(Boolean)
     .join(" ");
   return (
-    <div
-      className={`${styles.healthStat}${stat.alert ? ` ${styles.healthStatAlert}` : ""}`}
-    >
+    <div className={`${styles.healthStat}${stat.alert ? ` ${styles.healthStatAlert}` : ""}`}>
       <span className={styles.healthLabel}>{stat.label}</span>
       <span className={valueCls}>{stat.value}</span>
       {stat.trend && <span className={trendCls}>{stat.trend}</span>}
@@ -198,9 +182,9 @@ interface SprintGroupProps {
 function SprintGroup({ label, count, sprints, isActive }: SprintGroupProps): JSX.Element {
   return (
     <>
-      <div className={styles.sectionTitle} role="heading" aria-level={2}>
+      <h2 className={styles.sectionTitle}>
         {label} <span className={styles.sectionCount}>{count}</span>
-      </div>
+      </h2>
       {sprints.map((s) => (
         <SprintRow key={s.id} sprint={s} highlight={Boolean(isActive)} />
       ))}
@@ -257,15 +241,15 @@ function SprintRow({
 function pillClassFor(state: SprintRowData["state"]): string {
   switch (state) {
     case "executing":
-      return styles.pillExecuting;
+      return styles.pillExecuting ?? "";
     case "planned":
-      return styles.pillPlanned;
+      return styles.pillPlanned ?? "";
     case "complete":
-      return styles.pillComplete;
+      return styles.pillComplete ?? "";
     case "signoff":
-      return styles.pillSignoff;
+      return styles.pillSignoff ?? "";
     case "failed":
-      return styles.pillFailed;
+      return styles.pillFailed ?? "";
     default:
       return "";
   }
@@ -282,11 +266,7 @@ function InboxSidecar({ inbox }: { inbox: InboxBlock }): JSX.Element {
     <aside className={styles.inbox} aria-label="Feedback inbox">
       <div className={styles.inboxHeader}>
         <span>FEEDBACK INBOX</span>
-        <span
-          className={countCls}
-          data-testid="inbox-count"
-          data-warn={isWarn ? "true" : "false"}
-        >
+        <span className={countCls} data-testid="inbox-count" data-warn={isWarn ? "true" : "false"}>
           {inbox.unfiled} unfiled
         </span>
       </div>

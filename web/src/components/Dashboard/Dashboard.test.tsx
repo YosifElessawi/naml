@@ -63,7 +63,9 @@ describe("Dashboard", () => {
     const active = data.sprints.active[0];
     expect(active).toBeDefined();
     if (!active) return;
-    const row = screen.getByRole("button", { name: new RegExp(`Open sprint ${active.title}`, "i") });
+    const row = screen.getByRole("button", {
+      name: new RegExp(`Open sprint ${active.title}`, "i"),
+    });
     const cells = row.querySelectorAll("[data-slice-state]");
     expect(cells.length).toBe(active.slices.length);
     active.slices.forEach((sliceColor, i) => {
@@ -76,7 +78,9 @@ describe("Dashboard", () => {
     const queued = data.sprints.queued[0];
     expect(queued).toBeDefined();
     if (!queued) return;
-    const row = screen.getByRole("button", { name: new RegExp(`Open sprint ${queued.title}`, "i") });
+    const row = screen.getByRole("button", {
+      name: new RegExp(`Open sprint ${queued.title}`, "i"),
+    });
     fireEvent.click(row);
     expect(window.location.hash).toBe(`#/sprint/${queued.id}`);
   });
@@ -92,7 +96,11 @@ describe("Dashboard", () => {
     render(<Dashboard />);
     for (const bullet of data.inbox.bullets) {
       expect(screen.getByText(bullet.text)).toBeInTheDocument();
-      expect(screen.getByText(bullet.source)).toBeInTheDocument();
+    }
+    // Sources can repeat across bullets — verify each appears at least once.
+    const sources = new Set(data.inbox.bullets.map((b) => b.source));
+    for (const source of sources) {
+      expect(screen.getAllByText(source).length).toBeGreaterThanOrEqual(1);
     }
   });
 });
