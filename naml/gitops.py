@@ -83,6 +83,35 @@ def create_branch_from_base(
 
 
 def push_branch(branch: str, *, cwd: Path) -> None:
+    """Push the lane's slice branch to origin.
+
+    Uses ``--force-with-lease`` so a concurrent push by anyone else (humans,
+    other agents) is refused. The catch: lease evaluation uses our local
+    ``refs/remotes/origin/<branch>`` ref. If a previous PR for this branch
+    was closed-with-delete-branch on the remote, our remote-tracking ref
+    is stale and the lease fails with "stale info" even though it's safe
+    to push fresh.
+
+    Mitigation: on the FIRST failure, refresh remote-tracking via
+    ``git fetch --prune origin`` and retry once. Second failure surfaces
+    the real error.
+
+    naml is the only writer of ``naml/<sprint>/<slice>`` branches, so
+    force-with-lease is overkill in the common case — but the lease check
+    is still useful defence against a human pushing to the same branch
+    name out-of-band.
+    """
+    try:
+        git("push", "-u", "--force-with-lease", "origin", branch, cwd=cwd)
+        return
+    except GitError as first_err:
+        if "stale info" not in str(first_err).lower():
+            raise
+    # Refresh remote-tracking; tolerate a missing-on-remote branch.
+    try:
+        git("fetch", "--prune", "origin", cwd=cwd)
+    except GitError:
+        pass
     git("push", "-u", "--force-with-lease", "origin", branch, cwd=cwd)
 
 
