@@ -218,6 +218,12 @@ def run_sprint(
     scheduler = Scheduler(sprint, overlap_policy=overlap_policy)
     scheduler.preflight()  # may raise ScheduleError under "abort"
 
+    sprint_root = _resolve_sprint_root(cfg, sprint)
+    # Reconcile with any existing per-slice status files so a re-run does
+    # not pop slices that already succeeded (or are mid-attempt). Must run
+    # after preflight (forced edges already applied) and before lanes spawn.
+    scheduler.absorb_existing_statuses(sprint_root)
+
     width = sprint.dag_width()
     lane_count_resolved = lane_count or effective_lane_count(
         configured_default=cfg.parallel_lanes_default,
@@ -225,7 +231,6 @@ def run_sprint(
         dag_width=width,
     )
 
-    sprint_root = _resolve_sprint_root(cfg, sprint)
     state_mod.ensure_state_dir(sprint_root)
     sprint_state = state_mod.SprintState(
         sprint_id=sprint.id,
