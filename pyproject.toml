@@ -18,10 +18,12 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
 ]
-# aiohttp powers the cockpit server (long-lived SSE in slice-11). Everything
-# else is stdlib — keep new runtime deps to a minimum.
+# aiohttp powers the cockpit server (long-lived SSE in slice-11). watchdog
+# drives the file-system watcher feeding the in-memory metrics aggregator
+# (slice-10). Everything else is stdlib — keep new runtime deps to a minimum.
 dependencies = [
   "aiohttp>=3.9",
+  "watchdog>=3.0",
 ]
 dynamic = ["version"]
 
