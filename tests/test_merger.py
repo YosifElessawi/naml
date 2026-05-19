@@ -227,6 +227,36 @@ class TopologicalAndSkipTests(unittest.TestCase):
         # slice-1 in NEEDS_HUMAN_REVIEW must skip.
         self.assertEqual(called, ["slice-2"])
 
+    def test_merging_slice_is_resumable(self) -> None:
+        """A slice stuck in MERGING from a prior interrupted run should be
+        retried (not silently skipped like MERGED, and not log-skipped like
+        FAILED). The retry restarts at Tier 1."""
+        sprint = _FakeSprint([_FakeSlice("slice-1"), _FakeSlice("slice-2")])
+        # slice-1 already merged, slice-2 left in MERGING by a prior run.
+        self._seed_status("slice-1", states.MERGED)
+        self._seed_status("slice-2", states.MERGING)
+
+        called: list[str] = []
+
+        def fake_run(self_, *, tier_cap: int):  # noqa: ARG001
+            called.append(self_.slice.id)
+            return merger.MergeOutcome(
+                slice_id=self_.slice.id,
+                pr_url=self_.status.pr_url,
+                branch=self_.branch,
+                tier=1, success=True, detail="merged on retry",
+                started_at="2026-05-19T11:00:00+00:00",
+                finished_at="2026-05-19T11:00:01+00:00",
+                duration_seconds=1.0,
+            )
+
+        with patch.object(merger._SliceMerger, "run", fake_run):
+            report = merger.merge_sprint(sprint, self.cfg)
+
+        # slice-1 silently skipped (MERGED), slice-2 retried.
+        self.assertEqual(called, ["slice-2"])
+        self.assertEqual(report.merged_count(), 1)
+
     def test_sprint_state_transitions(self) -> None:
         sprint = _FakeSprint([_FakeSlice("slice-1")])
         self._seed_status("slice-1", states.REVIEW_PASSED)

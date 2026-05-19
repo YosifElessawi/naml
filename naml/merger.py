@@ -249,6 +249,10 @@ class _SliceMerger:
     def _tier1(self) -> tuple[bool, str, GateResult | None]:
         """Pure git/gh path. Returns (success, detail, last_gate_result)."""
         wt = self._ensure_worktree()
+        # If a previous run interrupted mid-rebase, abort it so Tier 1
+        # restarts from a clean tree. Idempotent — tolerates "no rebase
+        # in progress" silently.
+        gitops.rebase_abort(cwd=wt)
         # Refresh base.
         try:
             gitops.fetch_base(wt, self.cfg.base_branch)
@@ -609,12 +613,21 @@ def merge_sprint(
             )
             blocked_ids.add(slice_id)
             continue
-        if status.state != states.REVIEW_PASSED:
+        # MERGING means a prior run started the merge but didn't finish
+        # (most often: human interrupt of a Tier-3 agent). Resume by
+        # restarting from Tier 1 — `_SliceMerger.run` will abort any
+        # in-progress rebase first, so the retry begins from a clean tree.
+        if status.state not in {states.REVIEW_PASSED, states.MERGING}:
             log.info(
-                "[%s] state=%s — only review_passed slices are merged",
+                "[%s] state=%s — only review_passed / merging slices are merged",
                 slice_id, status.state,
             )
             continue
+        if status.state == states.MERGING:
+            log.info(
+                "[%s] resuming from interrupted merge — restarting at Tier 1",
+                slice_id,
+            )
         # If any declared upstream is blocked, skip this slice too.
         if any(dep in blocked_ids for dep in slice_.depends_on):
             log.info("[%s] depends on a blocked slice — skipping", slice_id)
