@@ -109,6 +109,26 @@ message). Do NOT push and do NOT open a PR. End with "DONE:" once the fix \
 is committed, or "BLOCKED:" with a question if you cannot resolve it."""
 
 
+def request_changes_prompt(*, review_text: str, pr_url: str) -> str:
+    """Resume prompt sent to the implementer after the reviewer requested changes.
+
+    The reviewer is a fresh, second-opinion agent. The implementer agent
+    keeps its session context, so this prompt only needs to hand over the
+    review and clarify the contract.
+    """
+    return f"""The auto-reviewer (a fresh second agent) reviewed your PR \
+({pr_url}) and requested changes. Their review:
+
+{review_text}
+
+Address the requested changes. Commit your fix with a conventional-commit \
+message. Do NOT push and do NOT touch the PR yourself — the orchestrator \
+re-pushes the branch and re-triggers the reviewer once you are done.
+
+End your final message with "DONE:" once the fix is committed, or \
+"BLOCKED:" with a question if you cannot proceed."""
+
+
 def reviewer_prompt(
     *,
     sprint: Sprint,
