@@ -32,12 +32,16 @@ Slice status values:
 
 from __future__ import annotations
 
+import sys
 import threading
 from collections import defaultdict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterable, Literal
 
 from .package import Slice, Sprint
+from . import state as state_mod
+from . import states
 
 
 SliceStatus = Literal[
@@ -177,6 +181,76 @@ class Scheduler:
                     if sch.status == "ready" and sch.depends_on:
                         sch.status = "pending"
                 self._reevaluate_ready_locked()
+
+    # ----- resume / re-run awareness --------------------------------------
+
+    def absorb_existing_statuses(self, sprint_root: Path) -> None:
+        """Reconcile the in-memory DAG with on-disk per-slice status files.
+
+        Call AFTER ``preflight()`` and BEFORE any lane thread spawns. For
+        each slice with a persisted ``status.json``:
+
+        - ``state in LANE_DONE_STATES`` → mark the slice done so dependents
+          are released. The lane never re-runs it.
+        - ``state in LANE_FAILED_STATES`` → mark the slice failed so
+          dependents propagate to ``blocked_upstream``. The lane never
+          re-runs it (the user must ``naml retry`` first).
+        - In-flight non-terminal state (``setup``, ``work``, ``pr``,
+          ``review``, ``merging``, etc.) → warn on stderr that the
+          orchestrator likely died mid-attempt, then treat the slice as
+          FAILED for the purposes of this run so its in-progress worktree
+          is not clobbered by a silent re-attempt. The user must explicitly
+          run ``naml retry`` (or ``naml recover``) to recover.
+
+        Slices with no status file are left as pending — they'll be picked
+        up by lanes normally.
+        """
+        for slice_ in self.sprint.slices:
+            sid = slice_.id
+            status = state_mod.load_slice_status(sprint_root, sid)
+            if status is None:
+                continue
+
+            if status.state in states.LANE_DONE_STATES:
+                self._absorb_terminal_locked(sid, done=True)
+            elif status.state in states.LANE_FAILED_STATES:
+                self._absorb_terminal_locked(sid, done=False)
+            elif status.state == states.PENDING:
+                # ``pending`` is the legitimate "fresh slate" state —
+                # either a brand-new slice or one that ``naml retry`` has
+                # just reset. Treat the same as "no status file": let the
+                # lane pick it up normally.
+                continue
+            else:
+                # In-flight or otherwise non-terminal. The previous naml
+                # run died mid-attempt; we don't know if a Claude session
+                # is still bound to the old session_id, and re-popping
+                # would race with whatever's still on disk in the worktree.
+                # Treat as failed for this run and tell the user how to
+                # recover.
+                print(
+                    f"naml: slice {sid} is in state {status.state!r} — "
+                    f"orchestrator may have died mid-attempt; run "
+                    f"`naml retry <sprint-dir> {sid}` to reset or "
+                    f"`naml recover` to inspect. Treating as failed for "
+                    f"this run; dependents will be blocked_upstream.",
+                    file=sys.stderr,
+                )
+                self._absorb_terminal_locked(sid, done=False)
+
+    def _absorb_terminal_locked(self, slice_id: str, *, done: bool) -> None:
+        """Force a slice into ``done``/``failed`` without going through
+        ``in_flight``. Mirrors ``mark_done``/``mark_failed`` side effects
+        (releases dependents or blocks descendants)."""
+        with self._cond:
+            sch = self._slices[slice_id]
+            if done:
+                sch.status = "done"
+                self._reevaluate_ready_locked()
+            else:
+                sch.status = "failed"
+                self._mark_descendants_blocked_locked(slice_id)
+            self._cond.notify_all()
 
     # ----- queue API ------------------------------------------------------
 
