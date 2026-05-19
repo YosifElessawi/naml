@@ -1,0 +1,448 @@
+/* naml cockpit · Lanes (Q6 Hybrid 2)
+   Compact gantt on top, kanban row underneath, queue strip at bottom.
+   Pixel-faithful port of artifacts/mockups/q6b-lane-hybrids.html (Hybrid 2). */
+
+.naml-lanes {
+  /* Locally scoped shorthand tokens. Each one reads the global token from
+     slice-2's `tokens.css` if present, otherwise falls back to the literal
+     so the component renders standalone in tests / Storybook.
+     Names are unique (`--nl-*`) to avoid self-referential var() lookups. */
+  --nl-bg-0: var(--bg-0, #0a0d12);
+  --nl-bg-1: var(--bg-1, #0f131a);
+  --nl-bg-2: var(--bg-2, #151b24);
+  --nl-bg-3: var(--bg-3, #1c2330);
+  --nl-border: var(--border, #2a3342);
+  --nl-border-soft: var(--border-soft, #1f2733);
+  --nl-text-0: var(--text-0, #e7ecf3);
+  --nl-text-1: var(--text-1, #b9c2cf);
+  --nl-text-2: var(--text-2, #7c8696);
+  --nl-text-3: var(--text-3, #4d5666);
+  --nl-accent: var(--c-accent, #38bdf8);
+  --nl-accent-2: var(--c-accent-2, #34d399);
+  --nl-warn: var(--c-warn, #fbbf24);
+  --nl-work: var(--c-work, #38bdf8);
+  --nl-review: var(--c-review, #fbbf24);
+  --nl-blocked: var(--c-blocked, #94a3b8);
+  --nl-mono: var(--mono, ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace);
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-family: var(--sans, -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif);
+  color: var(--nl-text-0);
+}
+
+/* ───────── section tag ───────── */
+.naml-lanes__tag {
+  font-family: var(--nl-mono);
+  font-size: 9.5px;
+  color: var(--nl-text-3);
+  letter-spacing: 0.14em;
+  margin: 4px 4px 0;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--nl-border-soft);
+}
+
+/* ───────── gantt ───────── */
+.naml-lanes__gantt {
+  background: var(--nl-bg-1);
+  border: 1px solid var(--nl-border-soft);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+
+.naml-lanes__gtime {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 0 8px 64px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--nl-border-soft);
+  font-family: var(--nl-mono);
+  font-size: 9.5px;
+  color: var(--nl-text-3);
+  letter-spacing: 0.1em;
+}
+.naml-lanes__gtime-tick--now {
+  color: var(--nl-accent);
+  font-weight: 600;
+}
+.naml-lanes__gtime-tick--eta {
+  color: var(--nl-text-3);
+}
+
+.naml-lanes__lane-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 10px;
+  align-items: stretch;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--nl-border-soft);
+}
+.naml-lanes__lane-row:last-child {
+  border-bottom: none;
+}
+
+.naml-lanes__lane-label {
+  font-family: var(--nl-mono);
+  font-size: 10.5px;
+  color: var(--nl-text-1);
+  align-self: center;
+}
+
+.naml-lanes__track {
+  position: relative;
+  height: 28px;
+  background: linear-gradient(180deg, var(--nl-bg-2), var(--nl-bg-1));
+  border-radius: 8px;
+  border: 1px solid var(--nl-border-soft);
+  overflow: hidden;
+}
+.naml-lanes__track--idle {
+  background: repeating-linear-gradient(
+    45deg,
+    var(--nl-bg-2),
+    var(--nl-bg-2) 8px,
+    var(--nl-bg-1) 8px,
+    var(--nl-bg-1) 16px
+  );
+}
+
+/* gantt blocks (live slice work) */
+.naml-lanes__block {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  padding: 4px 8px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  font-family: var(--nl-mono);
+  font-size: 10px;
+  color: #fff;
+  border-radius: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.naml-lanes__block-id {
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.naml-lanes__block-title {
+  font-size: 9px;
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.naml-lanes__block--work {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.7), rgba(56, 189, 248, 0.5));
+  border: 1px solid var(--nl-work);
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+}
+.naml-lanes__block--review {
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.65), rgba(251, 191, 36, 0.45));
+  border: 1px solid var(--nl-review);
+}
+.naml-lanes__block--merged {
+  background: linear-gradient(180deg, rgba(52, 211, 153, 0.55), rgba(52, 211, 153, 0.3));
+  border: 1px solid rgba(52, 211, 153, 0.6);
+}
+
+/* ghost block (scheduled, not yet started) — visually dimmer */
+.naml-lanes__ghost {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border: 1px dashed var(--nl-border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--nl-mono);
+  font-size: 9.5px;
+  color: var(--nl-text-3);
+  background: rgba(56, 189, 248, 0.03);
+  opacity: 0.7;
+}
+.naml-lanes__ghost--speculative {
+  opacity: 0.5;
+}
+.naml-lanes__ghost-id {
+  color: var(--nl-text-2);
+}
+
+/* idle "ready" band */
+.naml-lanes__ready {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border: 1px dashed rgba(56, 189, 248, 0.4);
+  border-radius: 5px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--nl-mono);
+  font-size: 8.5px;
+  color: var(--nl-accent);
+  letter-spacing: 0.1em;
+  background: rgba(56, 189, 248, 0.05);
+}
+
+/* "now" line — cyan vertical bar with glow, spans the swimlane */
+.naml-lanes__now-line {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--nl-accent);
+  box-shadow: 0 0 8px var(--nl-accent);
+  z-index: 5;
+}
+/* Render the NOW caption only on the first swimlane's now-line so the
+   label sits once above the gantt instead of stacking on every row. */
+.naml-lanes__lane-row:first-of-type .naml-lanes__now-line::before {
+  content: "NOW";
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--nl-mono);
+  font-size: 8px;
+  color: var(--nl-accent);
+  letter-spacing: 0.16em;
+  background: var(--nl-bg-1);
+  padding: 0 4px;
+}
+
+/* ───────── kanban row ───────── */
+.naml-lanes__cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.naml-lanes__card {
+  background: var(--nl-bg-1);
+  border: 1px solid var(--nl-border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.naml-lanes__card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.naml-lanes__card--work::before {
+  background: var(--nl-work);
+}
+.naml-lanes__card--review::before {
+  background: var(--nl-review);
+}
+.naml-lanes__card--idle::before {
+  background: var(--nl-blocked);
+}
+
+.naml-lanes__card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.naml-lanes__card-name {
+  font-family: var(--nl-mono);
+  font-size: 11.5px;
+  color: var(--nl-text-0);
+  font-weight: 600;
+}
+
+.naml-lanes__pill {
+  font-size: 8.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  letter-spacing: 0.1em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--nl-mono);
+}
+.naml-lanes__pill-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.naml-lanes__pill--work {
+  background: rgba(56, 189, 248, 0.15);
+  color: var(--nl-accent);
+}
+.naml-lanes__pill--work .naml-lanes__pill-dot {
+  background: var(--nl-accent);
+  box-shadow: 0 0 5px var(--nl-accent);
+  animation: naml-lanes-pulse 2s ease-in-out infinite;
+}
+.naml-lanes__pill--review {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--nl-review);
+}
+.naml-lanes__pill--review .naml-lanes__pill-dot {
+  background: var(--nl-review);
+  box-shadow: 0 0 5px var(--nl-review);
+}
+.naml-lanes__pill--idle {
+  background: var(--nl-bg-3);
+  color: var(--nl-text-3);
+}
+.naml-lanes__pill--idle .naml-lanes__pill-dot {
+  background: var(--nl-text-3);
+}
+
+.naml-lanes__card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.naml-lanes__card-title {
+  font-size: 11px;
+  color: var(--nl-text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.naml-lanes__card-title-sid {
+  color: var(--nl-accent);
+}
+
+.naml-lanes__meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.naml-lanes__meter-label {
+  font-family: var(--nl-mono);
+  font-size: 8.5px;
+  color: var(--nl-text-3);
+  letter-spacing: 0.08em;
+}
+.naml-lanes__meter-value {
+  font-family: var(--nl-mono);
+  font-size: 10px;
+  color: var(--nl-text-0);
+  font-weight: 600;
+}
+.naml-lanes__meter-value--warn {
+  color: var(--nl-warn);
+}
+.naml-lanes__meter-bar {
+  height: 4px;
+  background: var(--nl-bg-3);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+  margin-top: 2px;
+}
+.naml-lanes__meter-bar-fill {
+  position: absolute;
+  inset: 0;
+}
+.naml-lanes__meter-bar-fill--work {
+  background: var(--nl-work);
+}
+.naml-lanes__meter-bar-fill--warn {
+  background: var(--nl-warn);
+}
+
+.naml-lanes__idle-msg {
+  padding: 16px;
+  border: 1px dashed var(--nl-border);
+  border-radius: 5px;
+  text-align: center;
+  font-family: var(--nl-mono);
+  font-size: 9.5px;
+  color: var(--nl-text-3);
+  letter-spacing: 0.1em;
+}
+
+/* ───────── queue strip ───────── */
+.naml-lanes__queue {
+  background: var(--nl-bg-1);
+  border: 1px dashed var(--nl-border-soft);
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-family: var(--nl-mono);
+  font-size: 10.5px;
+  color: var(--nl-text-2);
+}
+.naml-lanes__queue-label {
+  color: var(--nl-text-3);
+  letter-spacing: 0.12em;
+}
+.naml-lanes__chip {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 3px 8px;
+  background: var(--nl-bg-2);
+  border: 1px solid var(--nl-border-soft);
+  border-radius: 5px;
+  color: var(--nl-text-1);
+}
+.naml-lanes__chip-id {
+  color: var(--nl-accent);
+}
+.naml-lanes__chip--ready {
+  border-color: rgba(52, 211, 153, 0.3);
+}
+.naml-lanes__chip--ready .naml-lanes__chip-id {
+  color: var(--nl-accent-2);
+}
+.naml-lanes__queue-spacer {
+  flex: 1;
+}
+.naml-lanes__queue-summary {
+  color: var(--nl-text-3);
+}
+
+/* ───────── pulse keyframes (component-local) ───────── */
+@keyframes naml-lanes-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .naml-lanes__pill--work .naml-lanes__pill-dot {
+    animation: none;
+  }
+}
+
+/* ───────── single-column reflow at <900px ───────── */
+@media (max-width: 899px) {
+  .naml-lanes__cards {
+    grid-template-columns: 1fr;
+  }
+  .naml-lanes__queue {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .naml-lanes__queue-spacer {
+    display: none;
+  }
+}
