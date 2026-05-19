@@ -1,0 +1,26 @@
+:root {
+  color-scheme: dark light;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #e6e9ef;
+}
+
+.naml-shell {
+  padding: 32px;
+}
+
+.naml-header h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.naml-subtle {
+  color: #8a93a6;
+  margin: 0;
+}

@@ -7,8 +7,9 @@ Surface:
 - ``naml inspect-sprint <sprint-dir>``
 - ``naml status``              — print the project + current sprint + slice
                                   hierarchy (same payload as /api/state)
-- ``naml serve [--bind H] [--port P]`` — HTTP server exposing /api/state
-                                  for the dashboard
+- ``naml serve [--bind H] [--port P]`` — aiohttp server exposing /healthz,
+                                  /api/state, /state, and the built web/
+                                  bundle for the cockpit
 - ``naml run <sprint-dir>``    — execute a sprint package
 - ``naml merge <sprint-dir>``  — walk review-clean slices through the
                                   4-tier merge pipeline (Phase 4 / MVP)
@@ -112,7 +113,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
-    from . import web as web_mod
+    from . import server as server_mod
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
@@ -122,7 +123,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         print(f"naml: {exc}", file=sys.stderr)
         return 1
 
-    web_mod.serve(cfg, host=args.bind, port=args.port)
+    server_mod.serve(cfg, host=args.bind, port=args.port)
     return 0
 
 
@@ -185,10 +186,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_serve = sub.add_parser(
         "serve",
-        help="run an HTTP server exposing /api/state for the dashboard",
+        help="run the cockpit HTTP server (healthz, api/state, state, web/dist)",
     )
     p_serve.add_argument("--bind", default="127.0.0.1", help="host to bind (default: 127.0.0.1)")
-    p_serve.add_argument("--port", type=int, default=7777, help="port (default: 7777)")
+    p_serve.add_argument("--port", type=int, default=8765, help="port (default: 8765)")
     p_serve.add_argument("--root", help="config root (default: cwd or walked up)")
     p_serve.set_defaults(func=_cmd_serve)
 
