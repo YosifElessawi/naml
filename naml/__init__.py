@@ -10,4 +10,4 @@ V2 entry points:
 - ``naml.cli`` — the ``naml`` command-line entry point (``naml migrate-config``).
 """
 
-__version__ = "0.2.0-dev"
+__version__ = "0.2.0.dev0"
