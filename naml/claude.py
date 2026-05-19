@@ -19,9 +19,14 @@ import json
 import os
 import signal
 import subprocess
+import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
+
+from .tokens import TurnEmitter
 
 
 _IMPLEMENTER_ALLOWED_TOOLS: tuple[str, ...] = (
@@ -175,25 +180,92 @@ def _spawn(
     log_path: Path,
     cap_minutes: int,
     header_label: str,
-) -> tuple[subprocess.Popen, int]:
-    """Start a Claude subprocess with the log file as stdout/stderr.
+    emitter: TurnEmitter | None = None,
+) -> tuple[subprocess.Popen, int, threading.Thread | None]:
+    """Start a Claude subprocess. Tee stdout to the log + optional emitter.
 
-    Returns ``(proc, log_start_offset)``. Caller waits + reads usage.
+    Returns ``(proc, log_start_offset, reader_thread)``. ``reader_thread`` is
+    ``None`` unless an ``emitter`` was provided. When present, callers should
+    ``join()`` it after the subprocess exits so the last bytes are flushed
+    before final-result parsing reads from the log.
+
+    Default path (no emitter): subprocess writes directly to the log file.
+    Same behaviour the lane has always had. Used by reviewer / merger.
+
+    Emitter path: we capture stdout via pipe and a dedicated thread re-writes
+    each line to the log AND feeds it to the ``TurnEmitter`` so per-turn
+    token / cost lines land in the slice JSONL as they happen — that's what
+    makes the cockpit's cost timeline tick live instead of jumping at end.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     start_offset = log_path.stat().st_size if log_path.exists() else 0
-    with log_path.open("a", encoding="utf-8") as log:
-        log.write(f"\n{'=' * 60}\nCLAUDE {header_label} (cap {cap_minutes}m)\n{'=' * 60}\n")
-        log.flush()
-        proc = subprocess.Popen(  # noqa: S603 — argv constructed, not a shell string
-            cmd,
-            cwd=str(cwd),
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    return proc, start_offset
+
+    # Write the banner first so it lands before any subprocess stdout.
+    with log_path.open("a", encoding="utf-8") as banner:
+        banner.write(f"\n{'=' * 60}\nCLAUDE {header_label} (cap {cap_minutes}m)\n{'=' * 60}\n")
+        banner.flush()
+
+    if emitter is None:
+        with log_path.open("a", encoding="utf-8") as log:
+            proc = subprocess.Popen(  # noqa: S603 — argv constructed, not a shell string
+                cmd,
+                cwd=str(cwd),
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+        return proc, start_offset, None
+
+    proc = subprocess.Popen(  # noqa: S603 — argv constructed, not a shell string
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        bufsize=1,           # line-buffered text mode
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    thread = threading.Thread(
+        target=_tee_stdout,
+        args=(proc.stdout, log_path, emitter),
+        name=f"naml-tee-{header_label[:24]}",
+        daemon=True,
+    )
+    thread.start()
+    return proc, start_offset, thread
+
+
+def _tee_stdout(
+    stream: IO[str] | None, log_path: Path, emitter: TurnEmitter
+) -> None:
+    """Reader-thread loop: copy stdout to the log file + feed the emitter.
+
+    Robust to:
+    - The subprocess being killed (pipe closes, loop exits).
+    - A single malformed line (``TurnEmitter.feed_line`` swallows that).
+    - The log file becoming unwriteable mid-run (we log to stderr, keep
+      feeding the emitter so cost data still flows).
+    """
+    if stream is None:
+        return
+    try:
+        with log_path.open("a", encoding="utf-8") as log:
+            for line in stream:
+                try:
+                    log.write(line)
+                    log.flush()
+                except OSError as exc:
+                    print(
+                        f"[naml.claude] tee write to {log_path} failed: {exc!s}",
+                        file=sys.stderr,
+                    )
+                emitter.feed_line(line)
+    except Exception as exc:  # noqa: BLE001 — last-line defence; thread must not crash silently
+        print(f"[naml.claude] tee thread aborted: {exc!s}", file=sys.stderr)
 
 
 # Grace period after we see a successful ``type:result`` event in the log
@@ -339,11 +411,20 @@ def run_implementer(
     cap_minutes: int = 30,
     resume: bool = False,
     display_name: str | None = None,
+    tokens_jsonl_path: Path | None = None,
+    slice_id: str = "",
+    model_context_max: int = 0,
 ) -> RunResult:
     """Run (or resume) the implementer agent inside a worktree.
 
     First call sets the session UUID via ``--session-id`` and an optional
     display name. ``resume=True`` re-enters that same UUID for a fix loop.
+
+    When ``tokens_jsonl_path`` is set, per-turn ``usage`` blocks are parsed
+    out of the stream-json stdout and appended to that JSONL as they happen
+    (drives the cockpit's live cost timeline). Omitted in pure tests or when
+    the lane doesn't have a sprint context, in which case the implementer
+    falls back to the legacy "subprocess writes straight to log" path.
     """
     env = _claude_env(claude_config_dir)
     base_flags = [
@@ -361,13 +442,23 @@ def run_implementer(
             cmd[1:1] = ["--name", display_name]
         label = f"START — session {session_id}"
 
-    proc, start_offset = _spawn(
+    emitter: TurnEmitter | None = None
+    if tokens_jsonl_path is not None and slice_id:
+        emitter = TurnEmitter(
+            jsonl_path=tokens_jsonl_path,
+            slice_id=slice_id,
+            session_id=session_id,
+            model_context_max=model_context_max or 200_000,
+        )
+
+    proc, start_offset, reader = _spawn(
         cmd,
         cwd=cwd,
         env=env,
         log_path=log_path,
         cap_minutes=cap_minutes,
         header_label=label,
+        emitter=emitter,
     )
     completed, timed_out, exit_code = _wait_under_cap(
         proc,
@@ -376,6 +467,10 @@ def run_implementer(
         cap_minutes=cap_minutes,
         label=label,
     )
+    # Drain the tee thread so the last bytes (incl. the final type:result
+    # event) are in the log before we parse usage.
+    if reader is not None:
+        reader.join(timeout=5)
     usage = _usage_from(_parse_final_result(log_path, start_offset))
     return RunResult(
         completed=completed,
@@ -407,7 +502,7 @@ def run_reviewer(
         "--dangerously-skip-permissions",
         "--allowedTools", _REVIEWER_ALLOWED_TOOLS,
     ]
-    proc, start_offset = _spawn(
+    proc, start_offset, _ = _spawn(
         cmd,
         cwd=cwd,
         env=env,
@@ -462,7 +557,7 @@ def run_merger(
         "--dangerously-skip-permissions",
         "--allowedTools", " ".join(_MERGER_ALLOWED_TOOLS),
     ]
-    proc, start_offset = _spawn(
+    proc, start_offset, _ = _spawn(
         cmd,
         cwd=cwd,
         env=env,
