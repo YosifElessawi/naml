@@ -1,11 +1,4 @@
-import {
-  Field,
-  Muted,
-  Panel,
-  Slider,
-  SliderValue,
-  Toggle,
-} from "../components/widgets.tsx";
+import { Field, Muted, Panel, Slider, SliderValue, Toggle } from "../components/widgets.tsx";
 import type { LanesConfig } from "../types.ts";
 
 const LANE_MIN = 1;
@@ -80,10 +73,7 @@ export function Lanes({
           max={LANE_MAX}
           step={1}
           onChange={(v) => {
-            const snapped = Math.max(
-              value.defaultLanes,
-              Math.min(LANE_MAX, Math.round(v)),
-            );
+            const snapped = Math.max(value.defaultLanes, Math.min(LANE_MAX, Math.round(v)));
             set("hardCap", snapped);
           }}
           onBlur={onCommit}

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import css from "./Health.module.css";
-import { FIXTURE_HEALTH, type BarCard, type TrendCard, type TrendPoint } from "./fixtures.ts";
+import { type BarCard, FIXTURE_HEALTH, type TrendCard, type TrendPoint } from "./fixtures.ts";
 
 const VIEW_W = 220;
 const VIEW_H = 48;
@@ -103,7 +103,7 @@ function TrendChart({ card }: { card: TrendCard }) {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * VIEW_W;
             let nearest = 0;
-            let bestDx = Infinity;
+            let bestDx = Number.POSITIVE_INFINITY;
             points.forEach((p, i) => {
               const dx = Math.abs(p.x - x);
               if (dx < bestDx) {
@@ -123,9 +123,7 @@ function TrendChart({ card }: { card: TrendCard }) {
           />
           {amberBand}
           <polyline className={stroke} points={pointsAttr(points)} />
-          {hovered ? (
-            <circle className={dotCls} cx={hovered.x} cy={hovered.y} r={3.2} />
-          ) : null}
+          {hovered ? <circle className={dotCls} cx={hovered.x} cy={hovered.y} r={3.2} /> : null}
         </svg>
         {hovered ? (
           <div
@@ -141,10 +139,7 @@ function TrendChart({ card }: { card: TrendCard }) {
       </div>
       <div className={css.legend}>
         <span>
-          <span
-            className={css.legendDot}
-            style={{ background: legendColor(card.tone) }}
-          />
+          <span className={css.legendDot} style={{ background: legendColor(card.tone) }} />
           {card.label.split("·")[0]?.trim() ?? card.label}
         </span>
       </div>

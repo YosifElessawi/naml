@@ -84,9 +84,7 @@ export function Gates({
   return (
     <Panel
       title="Gates · validation commands"
-      right={
-        <span className={css.gateOrder}>cheapest first</span>
-      }
+      right={<span className={css.gateOrder}>cheapest first</span>}
     >
       <div style={{ padding: "12px 18px" }}>
         {value.map((row, idx) => (
@@ -108,10 +106,7 @@ export function Gates({
               onBlur={onCommit}
             />
             <StatusPill status={row.status} ranAt={row.ranAt} />
-            <IconButton
-              ariaLabel={`remove gate ${row.name}`}
-              onClick={() => remove(idx)}
-            >
+            <IconButton ariaLabel={`remove gate ${row.name}`} onClick={() => remove(idx)}>
               ×
             </IconButton>
           </div>

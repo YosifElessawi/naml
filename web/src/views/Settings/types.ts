@@ -1,11 +1,4 @@
-export type TabId =
-  | "project"
-  | "lanes"
-  | "gates"
-  | "account"
-  | "sync"
-  | "health"
-  | "advanced";
+export type TabId = "project" | "lanes" | "gates" | "account" | "sync" | "health" | "advanced";
 
 export const TAB_ORDER: readonly TabId[] = [
   "project",

@@ -1,11 +1,4 @@
-import {
-  Field,
-  Muted,
-  Panel,
-  TextInput,
-  Toggle,
-  Unit,
-} from "../components/widgets.tsx";
+import { Field, Muted, Panel, TextInput, Toggle, Unit } from "../components/widgets.tsx";
 import type { SyncConfig } from "../types.ts";
 
 export function validateSync(s: SyncConfig): Partial<Record<keyof SyncConfig, string>> {
@@ -75,9 +68,7 @@ export function Sync({
         <TextInput
           id="sync-slow"
           value={value.slowThresholdSeconds.toString()}
-          onChange={(v) =>
-            set("slowThresholdSeconds", num(v, value.slowThresholdSeconds))
-          }
+          onChange={(v) => set("slowThresholdSeconds", num(v, value.slowThresholdSeconds))}
           onBlur={commitIfValid}
           width="short"
           invalid={Boolean(errors.slowThresholdSeconds)}
@@ -93,19 +84,14 @@ export function Sync({
         <TextInput
           id="sync-lost"
           value={value.lostThresholdSeconds.toString()}
-          onChange={(v) =>
-            set("lostThresholdSeconds", num(v, value.lostThresholdSeconds))
-          }
+          onChange={(v) => set("lostThresholdSeconds", num(v, value.lostThresholdSeconds))}
           onBlur={commitIfValid}
           width="short"
           invalid={Boolean(errors.lostThresholdSeconds)}
         />
         <Unit>seconds</Unit>
       </Field>
-      <Field
-        label="Reduce motion"
-        description="Disables card-flip + counter-tween animations."
-      >
+      <Field label="Reduce motion" description="Disables card-flip + counter-tween animations.">
         <Toggle
           ariaLabel="reduce motion"
           checked={value.reduceMotion}

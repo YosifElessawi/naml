@@ -43,14 +43,10 @@ describe("Settings", () => {
     expect(screen.getByLabelText(/^Repo slug$/)).toBeInTheDocument();
 
     fireEvent.click(navButton("lanes"));
-    expect(
-      screen.getByLabelText(/default parallel lanes/i),
-    ).toBeInTheDocument();
+    expect(screen.getByLabelText(/default parallel lanes/i)).toBeInTheDocument();
 
     fireEvent.click(navButton("gates"));
-    await waitFor(() =>
-      expect(screen.getByDisplayValue("lint")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByDisplayValue("lint")).toBeInTheDocument());
 
     fireEvent.click(navButton("health"));
     expect(screen.getByText(/Health · trends/i)).toBeInTheDocument();

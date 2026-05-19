@@ -1,13 +1,6 @@
 import { useState } from "react";
+import { Button, Field, Muted, Panel, Toggle, widgetCss as css } from "../components/widgets.tsx";
 import { resetAggregates } from "../config-client.ts";
-import {
-  Button,
-  Field,
-  Muted,
-  Panel,
-  Toggle,
-  widgetCss as css,
-} from "../components/widgets.tsx";
 import type { AdvancedConfig } from "../types.ts";
 
 type ConfirmKind = "reset-aggregates" | "wipe-history" | null;
@@ -80,9 +73,7 @@ export function Advanced({
             </div>
           ) : (
             <>
-              <Button onClick={() => setConfirming("reset-aggregates")}>
-                Reset aggregates
-              </Button>
+              <Button onClick={() => setConfirming("reset-aggregates")}>Reset aggregates</Button>
               {resetState === "ok" ? (
                 <Muted>cleared just now</Muted>
               ) : resetState === "fail" ? (

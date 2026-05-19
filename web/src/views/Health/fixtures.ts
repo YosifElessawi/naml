@@ -54,8 +54,9 @@ export const FIXTURE_HEALTH: HealthFixture = {
       value: "$118.42",
       detail: "avg $3.94/day · peak $11.20",
       tone: "default",
-      series: series(30, (i) =>
-        2.2 + Math.sin(i / 3) * 1.1 + (i % 7 === 0 ? 5 : 0) + Math.random() * 1.4,
+      series: series(
+        30,
+        (i) => 2.2 + Math.sin(i / 3) * 1.1 + (i % 7 === 0 ? 5 : 0) + Math.random() * 1.4,
       ),
     },
     {

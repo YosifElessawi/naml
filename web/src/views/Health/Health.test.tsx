@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { FIXTURE_HEALTH } from "./fixtures.ts";
 import { Health } from "./Health.tsx";
+import { FIXTURE_HEALTH } from "./fixtures.ts";
 
 describe("Health", () => {
   it("renders one trend card per fixture entry plus the bar card", () => {
@@ -18,9 +18,7 @@ describe("Health", () => {
     const { container } = render(<Health />);
     const charts = container.querySelectorAll("svg");
     // 5 trend cards + 1 bar card = 6 charts.
-    expect(charts.length).toBe(
-      FIXTURE_HEALTH.trends.length + FIXTURE_HEALTH.bars.length,
-    );
+    expect(charts.length).toBe(FIXTURE_HEALTH.trends.length + FIXTURE_HEALTH.bars.length);
     const polylines = container.querySelectorAll("polyline");
     expect(polylines.length).toBe(FIXTURE_HEALTH.trends.length);
   });

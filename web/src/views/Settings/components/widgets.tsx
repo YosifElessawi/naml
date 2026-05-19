@@ -1,9 +1,5 @@
-import type {
-  ChangeEvent,
-  KeyboardEvent,
-  ReactNode,
-} from "react";
-import { useEffect, useState } from "react";
+import type { ChangeEvent, KeyboardEvent, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import css from "./widgets.module.css";
 
 export function Panel({
@@ -129,11 +125,7 @@ export function SelectInput({
     <select
       id={id}
       aria-label={ariaLabel}
-      className={classes(
-        css.select,
-        width === "wide" && css.wide,
-        width === "short" && css.short,
-      )}
+      className={classes(css.select, width === "wide" && css.wide, width === "short" && css.short)}
       value={value}
       onChange={(e: ChangeEvent<HTMLSelectElement>) => onChange(e.target.value)}
       onBlur={onBlur}
@@ -199,9 +191,7 @@ export function Slider({
       max={max}
       step={step}
       value={value}
-      onChange={(e: ChangeEvent<HTMLInputElement>) =>
-        onChange(Number(e.target.value))
-      }
+      onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(Number(e.target.value))}
       onBlur={onBlur}
     />
   );
@@ -234,11 +224,7 @@ export function StatusPill({
   ranAt?: string;
 }) {
   if (status === "ok") {
-    return (
-      <span className={STATUS_CLASS.ok}>
-        ✓{ranAt ? ` last ran ${ranAt}` : ""}
-      </span>
-    );
+    return <span className={STATUS_CLASS.ok}>✓{ranAt ? ` last ran ${ranAt}` : ""}</span>;
   }
   if (status === "running") {
     return <span className={STATUS_CLASS.running}>▶ running</span>;
@@ -315,6 +301,16 @@ export function TagList({
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Imperative focus on the new-label input when it appears. The `autoFocus`
+  // attribute trips a11y/noAutofocus; calling .focus() in an effect is the
+  // sanctioned workaround and behaves identically for sighted users.
+  useEffect(() => {
+    if (adding) {
+      inputRef.current?.focus();
+    }
+  }, [adding]);
 
   function commit() {
     const trimmed = draft.trim();
@@ -337,13 +333,9 @@ export function TagList({
   return (
     <div className={css.tagList} aria-label={ariaLabel}>
       {values.map((v, i) => (
-        <span key={`${v}-${i}`} className={css.tag}>
+        <span key={v} className={css.tag}>
           {v}
-          <button
-            type="button"
-            aria-label={`remove ${v}`}
-            onClick={() => onRemove(i)}
-          >
+          <button type="button" aria-label={`remove ${v}`} onClick={() => onRemove(i)}>
             ×
           </button>
         </span>
@@ -351,8 +343,8 @@ export function TagList({
       {onAdd ? (
         adding ? (
           <input
+            ref={inputRef}
             className={css.input}
-            autoFocus
             value={draft}
             placeholder="label…"
             onChange={(e) => setDraft(e.target.value)}
@@ -361,11 +353,7 @@ export function TagList({
             aria-label="new label"
           />
         ) : (
-          <button
-            type="button"
-            className={css.tagAdd}
-            onClick={() => setAdding(true)}
-          >
+          <button type="button" className={css.tagAdd} onClick={() => setAdding(true)}>
             + add
           </button>
         )

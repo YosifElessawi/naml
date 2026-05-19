@@ -1,14 +1,14 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Account } from "./Account/Account.tsx";
 import { Advanced } from "./Advanced/Advanced.tsx";
-import { FIXTURE_SETTINGS, loadSettings } from "./config-client.ts";
 import { Gates } from "./Gates/Gates.tsx";
 import { Health as HealthTab } from "./Health/Health.tsx";
 import { Lanes } from "./Lanes/Lanes.tsx";
 import { Project } from "./Project/Project.tsx";
-import { SavedBadge } from "./components/widgets.tsx";
 import css from "./Settings.module.css";
 import { Sync } from "./Sync/Sync.tsx";
+import { SavedBadge } from "./components/widgets.tsx";
+import { FIXTURE_SETTINGS, loadSettings } from "./config-client.ts";
 import { TAB_ORDER, type TabId } from "./types.ts";
 import { useAutosave } from "./useAutosave.ts";
 
@@ -76,9 +76,7 @@ export function Settings({ tab, onTabChange }: SettingsProps) {
               {sepBefore ? <div className={css.navSep} /> : null}
               <button
                 type="button"
-                className={`${css.navItem} ${
-                  entry.id === activeTab ? css.active : ""
-                }`}
+                className={`${css.navItem} ${entry.id === activeTab ? css.active : ""}`}
                 aria-current={entry.id === activeTab ? "page" : undefined}
                 onClick={() => selectTab(entry.id)}
                 data-tab={entry.id}
@@ -87,9 +85,7 @@ export function Settings({ tab, onTabChange }: SettingsProps) {
                 <span>{entry.label}</span>
                 {entry.badge ? (
                   <span
-                    className={`${css.navBadge} ${
-                      entry.badge.tone === "trends" ? css.trends : ""
-                    }`}
+                    className={`${css.navBadge} ${entry.badge.tone === "trends" ? css.trends : ""}`}
                   >
                     {entry.badge.label}
                   </span>
@@ -130,18 +126,10 @@ export function Settings({ tab, onTabChange }: SettingsProps) {
           />
         ) : null}
         {activeTab === "lanes" ? (
-          <Lanes
-            value={draft.lanes}
-            onChange={(v) => updateSection("lanes", v)}
-            onCommit={flush}
-          />
+          <Lanes value={draft.lanes} onChange={(v) => updateSection("lanes", v)} onCommit={flush} />
         ) : null}
         {activeTab === "gates" ? (
-          <Gates
-            value={draft.gates}
-            onChange={(v) => updateSection("gates", v)}
-            onCommit={flush}
-          />
+          <Gates value={draft.gates} onChange={(v) => updateSection("gates", v)} onCommit={flush} />
         ) : null}
         {activeTab === "account" ? (
           <Account
@@ -151,11 +139,7 @@ export function Settings({ tab, onTabChange }: SettingsProps) {
           />
         ) : null}
         {activeTab === "sync" ? (
-          <Sync
-            value={draft.sync}
-            onChange={(v) => updateSection("sync", v)}
-            onCommit={flush}
-          />
+          <Sync value={draft.sync} onChange={(v) => updateSection("sync", v)} onCommit={flush} />
         ) : null}
         {activeTab === "health" ? <HealthTab /> : null}
         {activeTab === "advanced" ? (

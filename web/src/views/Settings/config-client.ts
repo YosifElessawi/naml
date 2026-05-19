@@ -12,12 +12,7 @@ export const FIXTURE_SETTINGS: NamlSettings = {
     labels: {
       sprintPrefix: "sprint:",
       slicePrefix: "slice:",
-      lifecycle: [
-        "naml:running",
-        "naml:review",
-        "naml:human-review",
-        "naml:done",
-      ],
+      lifecycle: ["naml:running", "naml:review", "naml:human-review", "naml:done"],
     },
   },
   lanes: {
@@ -39,11 +34,7 @@ export const FIXTURE_SETTINGS: NamlSettings = {
       "~/.claude-work · work",
     ],
     model: "claude-opus-4-7",
-    modelOptions: [
-      "claude-opus-4-7",
-      "claude-sonnet-4-6",
-      "claude-haiku-4-5",
-    ],
+    modelOptions: ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"],
     contextWindow: 200_000,
     sessionTokenLimit: null,
     weeklyTokenLimit: null,
@@ -68,10 +59,7 @@ export const FIXTURE_SETTINGS: NamlSettings = {
 
 const CONFIG_URL = "/config";
 
-async function safeFetch(
-  url: string,
-  init?: RequestInit,
-): Promise<Response | null> {
+async function safeFetch(url: string, init?: RequestInit): Promise<Response | null> {
   try {
     return await fetch(url, init);
   } catch {
@@ -104,9 +92,7 @@ export async function loadSettings(): Promise<NamlSettings> {
  * absent, the call is treated as a local-only save so autosave still
  * gives visual feedback.
  */
-export async function saveSettings(
-  partial: Partial<NamlSettings>,
-): Promise<boolean> {
+export async function saveSettings(partial: Partial<NamlSettings>): Promise<boolean> {
   const res = await safeFetch(CONFIG_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },

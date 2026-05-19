@@ -135,10 +135,7 @@ export function Project({
             onBlur={commitIfValid}
           />
         </Field>
-        <Field
-          label="Lifecycle labels"
-          description="naml-managed labels per state."
-        >
+        <Field label="Lifecycle labels" description="naml-managed labels per state.">
           <TagList
             ariaLabel="lifecycle labels"
             values={value.labels.lifecycle}

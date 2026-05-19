@@ -1,16 +1,7 @@
-import {
-  Field,
-  Panel,
-  SelectInput,
-  TextInput,
-} from "../components/widgets.tsx";
+import { Field, Panel, SelectInput, TextInput } from "../components/widgets.tsx";
 import type { AccountConfig } from "../types.ts";
 
-const KNOWN_MODELS = [
-  "claude-opus-4-7",
-  "claude-sonnet-4-6",
-  "claude-haiku-4-5",
-];
+const KNOWN_MODELS = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"];
 
 export function validateAccount(a: AccountConfig): Partial<Record<keyof AccountConfig, string>> {
   const errs: Partial<Record<keyof AccountConfig, string>> = {};
@@ -83,10 +74,7 @@ export function Account({
           }}
         />
       </Field>
-      <Field
-        label="Context window"
-        description="Used to compute slice ctx %. Pulled from model."
-      >
+      <Field label="Context window" description="Used to compute slice ctx %. Pulled from model.">
         <span className="mono">{fmtTokens(value.contextWindow)} tokens</span>
       </Field>
       <Field
