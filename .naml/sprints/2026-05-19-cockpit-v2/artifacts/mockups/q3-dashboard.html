@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q3 — Dashboard · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    /* the option-preview frames are larger here */
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .dash {
+      padding: 14px;
+      display: flex; flex-direction: column; gap: 12px;
+      font-size: 11px;
+    }
+
+    /* ── project hero card ── */
+    .hero {
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+      align-items: center;
+    }
+    .hero .pname {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--text-0);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .hero .pstate {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 8px;
+      background: rgba(56,189,248,0.12);
+      color: var(--c-accent);
+      border: 1px solid rgba(56,189,248,0.3);
+      border-radius: 999px;
+      font-family: var(--mono); font-size: 9.5px;
+      letter-spacing: 0.1em;
+      margin-left: 8px;
+    }
+    .hero .pstate .pdot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--c-accent); box-shadow: 0 0 5px var(--c-accent);
+    }
+    .hero .psub { color: var(--text-2); font-size: 10.5px; margin-top: 3px; font-family: var(--mono); }
+    .hero .stats {
+      display: grid; grid-template-columns: repeat(4, auto); gap: 12px;
+    }
+    .hero .stat {
+      text-align: right;
+    }
+    .hero .stat .v {
+      font-family: var(--mono);
+      font-size: 16px;
+      color: var(--text-0);
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .hero .stat .l {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* ── timeline section ── */
+    .section-title {
+      display: flex; align-items: baseline; gap: 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-3);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin: 4px 0 2px;
+    }
+    .section-title .count {
+      color: var(--c-accent);
+      background: rgba(56,189,248,0.1);
+      padding: 1px 6px; border-radius: 4px;
+      letter-spacing: 0;
+    }
+
+    /* ── sprint row card ── */
+    .srow {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: auto 1fr auto auto auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .srow.active { border-color: rgba(56,189,248,0.4); background: linear-gradient(90deg, rgba(56,189,248,0.06), var(--bg-1) 30%); }
+    .srow .stitle {
+      display: flex; flex-direction: column; gap: 2px; min-width: 0;
+    }
+    .srow .stitle .t {
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--text-0);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .srow .stitle .s {
+      color: var(--text-3); font-size: 10px;
+    }
+    .srow .pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 7px; border-radius: 999px;
+      font-family: var(--mono); font-size: 9.5px;
+      letter-spacing: 0.08em;
+    }
+    .pill.executing { background: rgba(56,189,248,0.15); color: var(--c-accent); }
+    .pill.signoff { background: rgba(251,191,36,0.15); color: var(--c-warn); }
+    .pill.complete { background: rgba(52,211,153,0.15); color: var(--c-accent-2); }
+    .pill.planned { background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border-soft); }
+    .srow .smeta {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-2);
+      text-align: right;
+    }
+    .srow .smeta b { color: var(--text-0); font-weight: 600; }
+    .srow .smini {
+      display: flex; gap: 2px;
+    }
+    .srow .smini i {
+      width: 14px; height: 6px; border-radius: 1px;
+      background: var(--bg-3);
+    }
+    .srow .smini i.work { background: var(--c-work); }
+    .srow .smini i.pr { background: var(--c-pr); }
+    .srow .smini i.review { background: var(--c-review); }
+    .srow .smini i.merged { background: var(--c-merged); }
+    .srow .smini i.failed { background: var(--c-failed); }
+    .srow .smini i.idle { background: var(--c-blocked); }
+    .srow .open {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--c-accent);
+      padding: 4px 8px;
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.25);
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    /* ── inbox sidecar ── */
+    .dash-grid {
+      display: grid;
+      grid-template-columns: 1fr 240px;
+      gap: 12px;
+    }
+    .inbox {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+      align-self: start;
+    }
+    .inbox .ih {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: var(--mono);
+      font-size: 10px; color: var(--text-3); letter-spacing: 0.14em;
+    }
+    .inbox .ih .cnt {
+      color: var(--c-warn); background: rgba(251,191,36,0.1);
+      padding: 1px 6px; border-radius: 4px; letter-spacing: 0;
+    }
+    .inbox .ibullet {
+      font-size: 10.5px;
+      color: var(--text-1);
+      line-height: 1.45;
+      padding: 6px 8px;
+      background: var(--bg-2);
+      border-left: 2px solid var(--c-warn);
+      border-radius: 0 4px 4px 0;
+    }
+    .inbox .ibullet .src {
+      display: block;
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--text-3);
+      margin-top: 3px;
+    }
+    .inbox .ic {
+      font-family: var(--mono); font-size: 9.5px; color: var(--c-accent);
+      padding: 5px 0;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    /* ── alt B: table ── */
+    .strip {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex; align-items: center; gap: 14px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-1);
+    }
+    .strip .v { color: var(--text-0); font-weight: 600; }
+    .strip .div { width: 1px; height: 16px; background: var(--border-soft); }
+    .stbl {
+      background: var(--bg-1); border: 1px solid var(--border-soft);
+      border-radius: 8px; overflow: hidden;
+    }
+    .stbl .thead, .stbl .trow {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto auto;
+      gap: 12px;
+      padding: 8px 12px;
+      font-family: var(--mono); font-size: 10px;
+      align-items: center;
+    }
+    .stbl .thead {
+      background: var(--bg-2);
+      color: var(--text-3); letter-spacing: 0.12em;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .stbl .trow { color: var(--text-1); border-top: 1px solid var(--border-soft); }
+    .stbl .trow:first-of-type { border-top: none; }
+    .stbl .trow b { color: var(--text-0); }
+
+    /* ── alt C: tree ── */
+    .tree {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 16px;
+      min-height: 280px;
+      position: relative;
+      overflow: hidden;
+    }
+    .tree svg { width: 100%; height: 100%; display: block; }
+    .tnode {
+      position: absolute;
+      width: 150px;
+      padding: 8px 10px;
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-1);
+    }
+    .tnode .tt { color: var(--text-0); font-size: 10.5px; }
+    .tnode .ts { color: var(--text-3); margin-top: 2px; }
+    .tnode.active { border-color: var(--c-accent); box-shadow: 0 0 0 1px rgba(56,189,248,0.3); }
+    .tnode.complete { border-color: rgba(52,211,153,0.4); }
+    .tnode.fb { background: rgba(219,39,119,0.08); border-color: rgba(219,39,119,0.35); }
+
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 03 / Dashboard</div>
+      <h1>What should the Dashboard show, and in what order?</h1>
+      <div class="qsub">
+        The Dashboard is the project-level view — the answer to "what's happening with this codebase right now?". It has to surface project state, the active sprint, queued sprints, feedback inbox, and account-level rollups without becoming a wall.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q2-header.html">← Q2</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — Hero card + sprint timeline + feedback inbox sidecar.</strong>
+      Project state pulse goes top (state pill + tokens + cost + Tier-1 hit-rate + mean sprint duration). Then a vertical timeline grouped <em>Active / Queued / Recent</em>. Feedback inbox lives as a right sidecar so unaddressed complaints never get hidden behind a tab. This mirrors how your eye scans an aviation HUD — primary status first, then ordered events, with peripheral indicators.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── Option A (RECOMMENDED): hero + timeline + inbox ─────────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Hero card + sprint timeline + feedback inbox sidecar</h2>
+      </div>
+      <div class="option-preview">
+        <div class="dash">
+          <!-- hero -->
+          <div class="hero">
+            <div>
+              <span class="pname">inpolicy/web</span>
+              <span class="pstate"><span class="pdot pulse"></span>ACTIVE</span>
+              <div class="psub">3 lanes · main · 14 sprints shipped · last merge 22m ago</div>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="v">$4.21</div><div class="l">today</div></div>
+              <div class="stat"><div class="v">9.2M</div><div class="l">tokens today</div></div>
+              <div class="stat"><div class="v">78%</div><div class="l">tier-1 merge</div></div>
+              <div class="stat"><div class="v">37m</div><div class="l">avg sprint</div></div>
+            </div>
+          </div>
+
+          <div class="dash-grid">
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <!-- ACTIVE -->
+              <div class="section-title">ACTIVE <span class="count">1</span></div>
+              <div class="srow active">
+                <div class="smini">
+                  <i class="merged"></i><i class="merged"></i><i class="review"></i><i class="work"></i><i class="work"></i><i class="idle"></i><i class="idle"></i><i class="idle"></i>
+                </div>
+                <div class="stitle">
+                  <div class="t">2026-05-19-html-renderer</div>
+                  <div class="s">started 21m ago · 3 lanes active</div>
+                </div>
+                <span class="pill executing">EXECUTING</span>
+                <div class="smeta">slices <b>5/8</b><br>cost <b>$2.41</b></div>
+                <div class="open">OPEN →</div>
+              </div>
+
+              <!-- QUEUED -->
+              <div class="section-title" style="margin-top: 6px;">QUEUED <span class="count">2</span></div>
+              <div class="srow">
+                <div class="smini"><i></i><i></i><i></i><i></i></div>
+                <div class="stitle">
+                  <div class="t">2026-05-20-eval-harness <span style="color: var(--text-3); font-size: 9px">↳ feedback</span></div>
+                  <div class="s">parent: html-renderer · 3 slices</div>
+                </div>
+                <span class="pill planned">PLANNED</span>
+                <div class="smeta">est <b>~14m</b></div>
+                <div class="open">OPEN →</div>
+              </div>
+              <div class="srow">
+                <div class="smini"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+                <div class="stitle">
+                  <div class="t">2026-05-21-policy-validator</div>
+                  <div class="s">greenfield · 6 slices</div>
+                </div>
+                <span class="pill planned">PLANNED</span>
+                <div class="smeta">est <b>~32m</b></div>
+                <div class="open">OPEN →</div>
+              </div>
+
+              <!-- RECENT -->
+              <div class="section-title" style="margin-top: 6px;">RECENT <span class="count">last 3</span></div>
+              <div class="srow">
+                <div class="smini"><i class="merged"></i><i class="merged"></i><i class="merged"></i><i class="merged"></i><i class="merged"></i></div>
+                <div class="stitle">
+                  <div class="t">2026-05-18-config-rename</div>
+                  <div class="s">5 slices · 28m</div>
+                </div>
+                <span class="pill complete">COMPLETE</span>
+                <div class="smeta">tier-1 <b>5/5</b></div>
+                <div class="open">VIEW →</div>
+              </div>
+              <div class="srow">
+                <div class="smini"><i class="merged"></i><i class="merged"></i><i class="merged"></i></div>
+                <div class="stitle">
+                  <div class="t">2026-05-17-feedback-skill</div>
+                  <div class="s">3 slices · 19m</div>
+                </div>
+                <span class="pill complete">COMPLETE</span>
+                <div class="smeta">tier-1 <b>3/3</b></div>
+                <div class="open">VIEW →</div>
+              </div>
+            </div>
+
+            <!-- INBOX sidecar -->
+            <div class="inbox">
+              <div class="ih"><span>FEEDBACK INBOX</span><span class="cnt">4 unfiled</span></div>
+              <div class="ibullet">
+                Slider doesn't snap to grid values.
+                <span class="src">2026-05-19 · target: html-renderer</span>
+              </div>
+              <div class="ibullet">
+                HTML output uses <code>&lt;b&gt;</code> instead of <code>&lt;strong&gt;</code>.
+                <span class="src">2026-05-19 · target: html-renderer</span>
+              </div>
+              <div class="ibullet">
+                API response missing <code>created_at</code>.
+                <span class="src">2026-05-18 · target: html-renderer</span>
+              </div>
+              <div class="ic">/grill-feedback →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Hero stats roll up account-level usage scoped to <em>this project</em> (not global). Sprint cards use a mini state-strip — each cell = one slice colored by its slice state, so you can read the sprint's shape at a glance without opening it. Inbox sidecar shows the 3 most recent bullets + count; clicking "/grill-feedback →" kicks off the feedback grilling skill against the targeted sprint.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Project pulse readable in &lt; 1 second</li>
+              <li>Mini state-strip = sprint shape at a glance</li>
+              <li>Feedback never falls behind a tab</li>
+              <li>Active / Queued / Recent matches mental model</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Dense — many regions on one screen</li>
+              <li>Sidecar narrows on small monitors</li>
+              <li>Lineage relationships shown only via label, not visually</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option B: strip + big table ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Strip + dominant sprint table</h2>
+      </div>
+      <div class="option-preview">
+        <div class="dash">
+          <div class="strip">
+            <span><span class="pstate" style="margin: 0; vertical-align: middle"><span class="pdot pulse"></span>ACTIVE</span></span>
+            <span>3 lanes</span>
+            <span class="div"></span>
+            <span>today <span class="v">$4.21 · 9.2M</span></span>
+            <span class="div"></span>
+            <span>tier-1 <span class="v">78%</span></span>
+            <span class="div"></span>
+            <span>avg sprint <span class="v">37m</span></span>
+            <span class="div"></span>
+            <span>14 shipped</span>
+          </div>
+          <div class="stbl">
+            <div class="thead">
+              <div>SPRINT</div>
+              <div>STATE</div>
+              <div>SLICES</div>
+              <div>COST</div>
+              <div>DURATION</div>
+            </div>
+            <div class="trow">
+              <div><b>2026-05-19-html-renderer</b> · greenfield</div>
+              <div><span class="pill executing">EXECUTING</span></div>
+              <div><b>5/8</b></div>
+              <div>$2.41</div>
+              <div>21m</div>
+            </div>
+            <div class="trow">
+              <div><b>2026-05-20-eval-harness</b> · feedback of html-renderer</div>
+              <div><span class="pill planned">PLANNED</span></div>
+              <div>0/3</div>
+              <div>—</div>
+              <div>est 14m</div>
+            </div>
+            <div class="trow">
+              <div><b>2026-05-21-policy-validator</b></div>
+              <div><span class="pill planned">PLANNED</span></div>
+              <div>0/6</div>
+              <div>—</div>
+              <div>est 32m</div>
+            </div>
+            <div class="trow">
+              <div><b>2026-05-18-config-rename</b></div>
+              <div><span class="pill complete">COMPLETE</span></div>
+              <div>5/5</div>
+              <div>$1.85</div>
+              <div>28m</div>
+            </div>
+            <div class="trow">
+              <div><b>2026-05-17-feedback-skill</b></div>
+              <div><span class="pill complete">COMPLETE</span></div>
+              <div>3/3</div>
+              <div>$0.94</div>
+              <div>19m</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Tighter, table-style. Sort by state / cost / duration. Inbox + lineage move into separate tabs ("Feedback", "History"). Best when you have a lot of sprints and want a database feel.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Sortable, scannable</li>
+              <li>Compact — fits more rows</li>
+              <li>Familiar (Linear-style)</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Active sprint doesn't stand out</li>
+              <li>Inbox needs a click</li>
+              <li>Less "cockpit", more "admin"</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option C: lineage tree ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Lineage tree · sprints as a git-style graph</h2>
+      </div>
+      <div class="option-preview">
+        <div class="dash">
+          <div class="strip">
+            <span><span class="pstate" style="margin: 0; vertical-align: middle"><span class="pdot pulse"></span>ACTIVE</span></span>
+            <span class="div"></span>
+            <span>today <span class="v">$4.21</span></span>
+            <span class="div"></span>
+            <span>tier-1 <span class="v">78%</span></span>
+          </div>
+          <div class="tree">
+            <svg viewBox="0 0 700 280" preserveAspectRatio="none">
+              <!-- main spine -->
+              <line x1="40" y1="40" x2="40" y2="240" stroke="#2a3342" stroke-width="2"/>
+              <!-- nodes on spine -->
+              <circle cx="40" cy="40" r="6" fill="#34d399"/>
+              <circle cx="40" cy="100" r="6" fill="#34d399"/>
+              <circle cx="40" cy="160" r="6" fill="#38bdf8" stroke="#38bdf8" stroke-width="3" fill-opacity="0.3"/>
+              <circle cx="40" cy="220" r="6" fill="#4d5666"/>
+              <!-- feedback branch -->
+              <path d="M 40 160 Q 200 160 200 200" stroke="#db2777" stroke-width="2" fill="none" stroke-dasharray="3 3"/>
+              <circle cx="200" cy="200" r="6" fill="#db2777"/>
+            </svg>
+            <div class="tnode complete" style="top: 24px; left: 70px;">
+              <div class="tt">2026-05-17-feedback-skill</div>
+              <div class="ts">3 slices · complete</div>
+            </div>
+            <div class="tnode complete" style="top: 84px; left: 70px;">
+              <div class="tt">2026-05-18-config-rename</div>
+              <div class="ts">5 slices · complete</div>
+            </div>
+            <div class="tnode active" style="top: 144px; left: 70px;">
+              <div class="tt">2026-05-19-html-renderer</div>
+              <div class="ts">5/8 · executing</div>
+            </div>
+            <div class="tnode" style="top: 204px; left: 70px;">
+              <div class="tt">2026-05-21-policy-validator</div>
+              <div class="ts">queued · 6 slices</div>
+            </div>
+            <div class="tnode fb" style="top: 184px; left: 230px;">
+              <div class="tt">2026-05-20-eval-harness</div>
+              <div class="ts">feedback child · queued</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Sprint lineage as a vertical timeline; feedback children branch off their parent. Beautiful for projects with a long history — instantly shows where iteration happened. Sparse and confusing for a brand-new project with 2 sprints.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Lineage is visual, not just a label</li>
+              <li>Iteration patterns jump out</li>
+              <li>Distinctive — doesn't feel like another app</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Empty until you have history</li>
+              <li>Hard to fit 20+ sprints</li>
+              <li>Stats + inbox need extra surface</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a dashboard direction.</strong> Reply with <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      Two side decisions if you go with A:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Hero stats</strong> — these 4 ok? (<code>today $</code>, <code>tokens today</code>, <code>tier-1 hit %</code>, <code>avg sprint duration</code>). I'd swap one in for <code>sprints this week</code> if you want velocity over cost.</li>
+        <li><strong>Mini state-strip on sprint rows</strong> — one cell per slice colored by its state. Worth it for the at-a-glance shape, but adds 8–15 colored cells per row. Keep it, or drop in favor of a single progress bar?</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

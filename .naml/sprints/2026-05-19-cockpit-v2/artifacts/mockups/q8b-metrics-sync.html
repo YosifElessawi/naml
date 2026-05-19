@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q8b — Metrics sync architecture · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 16px; min-height: 0; background: var(--bg-0); }
+
+    /* big data-flow pipeline (vertical-ish) */
+    .pipe {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .pipe-row {
+      display: grid;
+      grid-template-columns: 220px 28px 1fr 28px 220px;
+      align-items: center;
+      gap: 4px;
+    }
+    .pnode {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: var(--mono);
+    }
+    .pnode.io { border-color: var(--c-accent); background: rgba(56,189,248,0.05); }
+    .pnode.disk { border-color: rgba(167,139,250,0.4); background: rgba(167,139,250,0.05); }
+    .pnode.mem { border-color: var(--c-accent-2); background: rgba(52,211,153,0.05); }
+    .pnode.ui { border-color: var(--c-warn); background: rgba(251,191,36,0.05); }
+    .pnode .nh {
+      font-size: 8.5px; letter-spacing: 0.14em; color: var(--text-3);
+      margin-bottom: 3px;
+    }
+    .pnode .nt { font-size: 11.5px; color: var(--text-0); font-weight: 600; }
+    .pnode .ns { font-size: 9.5px; color: var(--text-2); margin-top: 4px; line-height: 1.4; }
+    .pnode code { font-size: 9.5px; }
+    .parrow {
+      text-align: center;
+      color: var(--c-accent);
+      font-family: var(--mono); font-size: 14px;
+    }
+    .parrow .lbl {
+      display: block; font-size: 8.5px; color: var(--text-3); letter-spacing: 0.1em;
+      margin-bottom: 2px;
+    }
+
+    /* central aggregator block */
+    .agg {
+      background: var(--bg-1);
+      border: 1px solid rgba(52,211,153,0.3);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .agg .agh {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--c-accent-2); letter-spacing: 0.14em;
+      margin-bottom: 8px;
+    }
+    .agg .agbody {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+      font-family: var(--mono); font-size: 11px;
+    }
+    .agg .agtab {
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      padding: 8px 10px;
+    }
+    .agg .agtab .at {
+      font-size: 9px; color: var(--text-3); letter-spacing: 0.12em;
+      margin-bottom: 4px;
+    }
+    .agg .agtab .row {
+      display: flex; justify-content: space-between;
+      font-size: 10.5px; padding: 1px 0;
+    }
+    .agg .agtab .row .k { color: var(--text-2); }
+    .agg .agtab .row .v { color: var(--text-0); font-weight: 600; }
+
+    /* code blocks */
+    .codepane {
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-1);
+      line-height: 1.55;
+      white-space: pre-wrap;
+      overflow-x: auto;
+    }
+    .codepane .k { color: var(--c-accent); }
+    .codepane .s { color: var(--c-accent-2); }
+    .codepane .n { color: var(--c-warn); }
+    .codepane .c { color: var(--text-3); }
+
+    .blockh {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--c-accent); letter-spacing: 0.14em;
+      margin: 14px 4px 8px;
+    }
+    .blockh.green { color: var(--c-accent-2); }
+    .blockh.purple { color: #c4b5fd; }
+
+    /* tables */
+    .ttab {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .ttab table { width: 100%; border-collapse: collapse; }
+    .ttab th, .ttab td {
+      text-align: left; padding: 8px 12px;
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 11.5px;
+      vertical-align: top;
+    }
+    .ttab th {
+      background: var(--bg-2);
+      font-family: var(--mono); font-size: 10px; color: var(--text-3);
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .ttab tr:last-child td { border-bottom: none; }
+    .ttab td:first-child { font-family: var(--mono); color: var(--text-0); font-weight: 600; white-space: nowrap; }
+    .ttab td:nth-child(2) { font-family: var(--mono); color: var(--c-accent); white-space: nowrap; }
+    .ttab td:last-child { color: var(--text-1); }
+
+    /* latency budget bar */
+    .latency {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .lbar {
+      height: 38px;
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      position: relative;
+      display: flex;
+      overflow: hidden;
+    }
+    .lbar .seg {
+      position: relative;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 10px;
+      color: #fff;
+      text-shadow: 0 1px 1px rgba(0,0,0,0.5);
+      border-right: 1px solid rgba(0,0,0,0.3);
+    }
+    .lbar .seg:last-child { border-right: none; }
+    .lbar .seg.s1 { background: rgba(56,189,248,0.6); }
+    .lbar .seg.s2 { background: rgba(167,139,250,0.5); }
+    .lbar .seg.s3 { background: rgba(52,211,153,0.5); }
+    .lbar .seg.s4 { background: rgba(251,191,36,0.5); }
+    .lbar .seg.s5 { background: rgba(244,114,182,0.5); }
+    .lbar-x {
+      display: flex; justify-content: space-between;
+      font-family: var(--mono); font-size: 9px; color: var(--text-3);
+      margin-top: 4px;
+    }
+    .lbar-legend {
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+      margin-top: 10px;
+      font-family: var(--mono); font-size: 10px;
+    }
+    .lbar-legend .lc {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .lbar-legend .lc i {
+      width: 10px; height: 10px; border-radius: 2px;
+    }
+    .lbar-legend .lc .lcl { color: var(--text-2); }
+
+    .verdict-banner {
+      background: linear-gradient(135deg, rgba(52,211,153,0.1), rgba(56,189,248,0.05));
+      border: 1px solid rgba(52,211,153,0.3);
+      border-radius: 10px;
+      padding: 14px 18px;
+      margin: 12px 0;
+      font-size: 13px;
+      color: var(--text-0);
+      line-height: 1.55;
+    }
+    .verdict-banner strong { color: var(--c-accent-2); }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 08b / Metrics sync — architecture</div>
+      <h1>Where do metrics live, who aggregates them, and is it fast?</h1>
+      <div class="qsub">
+        State lives in <code>state/*.json</code> files. But metrics — token counts, costs, context window, today/week/lifetime rollups — come from Claude's streaming output, not from disk state. So the question splits in three: <strong>where do raw events come from</strong>, <strong>who aggregates them</strong>, and <strong>do we need a DB?</strong>
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q8-sync.html">← Q8</a>
+    </nav>
+  </header>
+
+  <div class="verdict-banner">
+    <strong>Short answer: no DB. Append-only JSONL on disk + in-memory aggregator in the server process.</strong>
+    Naml is a single-user local tool. Adding SQLite or Postgres is centralization theater for a problem that's already solved by the filesystem. The JSONL files <em>are</em> the database — they're append-only, replayable, debuggable, and small. Aggregations live in RAM and are rebuilt from disk on cold start in &lt; 2 seconds for a 6-month-old project. Latency disk→DOM stays under ~120ms.
+  </div>
+
+  <article class="option recommended">
+    <div class="badge-rec">ARCHITECTURE</div>
+    <div class="option-head">
+      <div class="opt-tag">FULL METRICS PIPELINE</div>
+      <h2>Claude stream → JSONL → in-memory aggregator → SSE → cockpit</h2>
+    </div>
+    <div class="option-preview">
+
+      <!-- ───── DATA FLOW PIPELINE ───── -->
+      <div class="blockh">DATA FLOW · one pipeline, two event types</div>
+      <div class="pipe">
+        <!-- top row: state -->
+        <div class="pipe-row">
+          <div class="pnode io">
+            <div class="nh">CLAUDE PROCESS · per slice</div>
+            <div class="nt">claude -p --output-format stream-json</div>
+            <div class="ns">Emits one JSON object per turn:<br><code>{ "type": "assistant", "usage": { "input_tokens": …, "output_tokens": …, "cache_read": …, "cache_write": …, "cost_usd": … } }</code></div>
+          </div>
+          <div class="parrow"><span class="lbl">stdout</span>→</div>
+          <div class="pnode disk">
+            <div class="nh">LANE WORKER · parser</div>
+            <div class="nt">tail stream · parse usage · append</div>
+            <div class="ns">For each <code>usage</code> block, append one line to:<br><code>state/&lt;slice&gt;.tokens.jsonl</code></div>
+          </div>
+          <div class="parrow"><span class="lbl">fs.write</span>→</div>
+          <div class="pnode disk">
+            <div class="nh">DISK · append-only</div>
+            <div class="nt">.naml/sprints/&lt;id&gt;/state/</div>
+            <div class="ns"><code>slice-4.tokens.jsonl</code> · grows by ~80 bytes per turn · ~20–200 lines per slice</div>
+          </div>
+        </div>
+
+        <!-- arrow down -->
+        <div style="text-align: center; color: var(--c-accent); font-family: var(--mono); padding: 4px 0;">
+          <span style="font-size: 8.5px; color: var(--text-3); letter-spacing: 0.1em;">fsevents</span>
+          <div style="font-size: 18px;">↓</div>
+        </div>
+
+        <!-- middle row: server-side aggregator -->
+        <div class="pipe-row" style="grid-template-columns: 1fr;">
+          <div class="agg">
+            <div class="agh">SERVER PROCESS · in-memory aggregator (single source of truth at runtime)</div>
+            <div class="agbody">
+              <div class="agtab">
+                <div class="at">HOT SLICE METRICS · live, per active slice</div>
+                <div class="row"><span class="k">slice-4.cost_usd</span><span class="v">$0.41</span></div>
+                <div class="row"><span class="k">slice-4.tokens_in</span><span class="v">82,140</span></div>
+                <div class="row"><span class="k">slice-4.cache_read</span><span class="v">1,243,000</span></div>
+                <div class="row"><span class="k">slice-4.ctx_pct</span><span class="v">73%</span></div>
+                <div class="row"><span class="k">slice-4.last_event_at</span><span class="v">14:23:14</span></div>
+              </div>
+              <div class="agtab">
+                <div class="at">ROLLUPS · derived, recomputed on each tick</div>
+                <div class="row"><span class="k">sprint.cost</span><span class="v">$2.41 (= Σ slice.cost)</span></div>
+                <div class="row"><span class="k">project.today</span><span class="v">$4.21</span></div>
+                <div class="row"><span class="k">project.week</span><span class="v">$24.80</span></div>
+                <div class="row"><span class="k">project.last_30d</span><span class="v">$118.42</span></div>
+                <div class="row"><span class="k">project.lifetime</span><span class="v">$342.16</span></div>
+              </div>
+            </div>
+            <div style="margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--text-3);">
+              ▢ Memory footprint for a 6-month-old project · ~3MB · all aggregates · O(1) update per token event
+            </div>
+          </div>
+        </div>
+
+        <div style="text-align: center; color: var(--c-accent); font-family: var(--mono); padding: 4px 0;">
+          <span style="font-size: 8.5px; color: var(--text-3); letter-spacing: 0.1em;">SSE</span>
+          <div style="font-size: 18px;">↓</div>
+        </div>
+
+        <!-- bottom row: ssE -->
+        <div class="pipe-row">
+          <div class="pnode mem">
+            <div class="nh">SERVER · SSE EMITTER</div>
+            <div class="nt">emit 2 event types</div>
+            <div class="ns">
+              <code>event: state-update</code> — slice/sprint state transitions<br>
+              <code>event: metric-tick</code> — token + cost deltas + new rollups
+            </div>
+          </div>
+          <div class="parrow"><span class="lbl">stream</span>→</div>
+          <div class="pnode ui">
+            <div class="nh">BROWSER · EVENTSOURCE</div>
+            <div class="nt">apply patch · animate</div>
+            <div class="ns">Patch the slice card, sprint aux strip, hero, right rail — all driven from the same in-memory store</div>
+          </div>
+          <div class="parrow"><span class="lbl">render</span>→</div>
+          <div class="pnode ui">
+            <div class="nh">DOM</div>
+            <div class="nt">counters tween, bars animate</div>
+            <div class="ns">No flicker. Counters count up. Bars ease into new widths.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ───── TOKEN EVENT SCHEMA ───── -->
+      <div class="blockh purple">JSONL SCHEMA · one line per Claude turn (append-only)</div>
+      <div class="codepane">
+<span class="c">// .naml/sprints/2026-05-19-html-renderer/state/slice-4.tokens.jsonl</span>
+{<span class="k">"t"</span>: <span class="s">"2026-05-19T14:23:14.812Z"</span>, <span class="k">"slice"</span>: <span class="s">"slice-4"</span>, <span class="k">"session"</span>: <span class="s">"9b0c…ef13"</span>, <span class="k">"turn"</span>: <span class="n">12</span>, <span class="k">"tokens_in"</span>: <span class="n">2143</span>, <span class="k">"tokens_out"</span>: <span class="n">488</span>, <span class="k">"cache_read"</span>: <span class="n">98000</span>, <span class="k">"cache_write"</span>: <span class="n">0</span>, <span class="k">"cost_usd"</span>: <span class="n">0.0124</span>, <span class="k">"ctx_pct"</span>: <span class="n">73</span>}
+{<span class="k">"t"</span>: <span class="s">"2026-05-19T14:23:15.221Z"</span>, <span class="k">"slice"</span>: <span class="s">"slice-4"</span>, <span class="k">"session"</span>: <span class="s">"9b0c…ef13"</span>, <span class="k">"turn"</span>: <span class="n">13</span>, <span class="k">"tokens_in"</span>: <span class="n">1872</span>, <span class="k">"tokens_out"</span>: <span class="n">612</span>, <span class="k">"cache_read"</span>: <span class="n">112000</span>, <span class="k">"cache_write"</span>: <span class="n">14000</span>, <span class="k">"cost_usd"</span>: <span class="n">0.0186</span>, <span class="k">"ctx_pct"</span>: <span class="n">74</span>}
+<span class="c">// …one line appended per turn, atomic, fsync'd</span>
+      </div>
+
+      <!-- ───── COLD START REPLAY ───── -->
+      <div class="blockh green">COLD START · server boot replay (one-time, &lt; 2s)</div>
+      <div class="codepane">
+<span class="c"># pseudocode — server start sequence</span>
+<span class="k">on</span> server_start():
+    aggregates = {<span class="s">"per_slice"</span>: {}, <span class="s">"per_sprint"</span>: {}, <span class="s">"per_project"</span>: {}}
+
+    <span class="c"># scan all jsonl files for this project</span>
+    <span class="k">for</span> sprint_dir <span class="k">in</span> Path(<span class="s">".naml/sprints"</span>).iterdir():
+        <span class="k">for</span> jsonl <span class="k">in</span> (sprint_dir/<span class="s">"state"</span>).glob(<span class="s">"*.tokens.jsonl"</span>):
+            <span class="k">for</span> line <span class="k">in</span> jsonl.read_text().splitlines():
+                ev = json.loads(line)
+                apply_event(aggregates, ev)            <span class="c"># O(1) per line</span>
+
+    <span class="c"># now aggregates is fully warm; bind sse handlers</span>
+    fs_watch(<span class="s">".naml/sprints"</span>, on_change=apply_delta_and_emit)
+
+<span class="k">on</span> file_change(path):
+    <span class="k">if</span> path.endswith(<span class="s">".tokens.jsonl"</span>):
+        new_lines = read_tail_since_last_position(path)
+        <span class="k">for</span> ev <span class="k">in</span> new_lines:
+            apply_event(aggregates, ev)
+            sse_emit(<span class="s">"metric-tick"</span>, {
+                <span class="s">"slice"</span>: ev[<span class="s">"slice"</span>],
+                <span class="s">"delta"</span>: ev,
+                <span class="s">"rollups"</span>: {
+                    <span class="s">"sprint_cost"</span>: aggregates[<span class="s">"per_sprint"</span>][sprint][<span class="s">"cost"</span>],
+                    <span class="s">"project_today"</span>: aggregates[<span class="s">"per_project"</span>][project][<span class="s">"today"</span>],
+                    <span class="s">"project_lifetime"</span>: aggregates[<span class="s">"per_project"</span>][project][<span class="s">"lifetime"</span>],
+                },
+            })
+    <span class="k">elif</span> path.endswith(<span class="s">".status.json"</span>):
+        sse_emit(<span class="s">"state-update"</span>, json.load(path))
+      </div>
+
+      <!-- ───── LATENCY BUDGET ───── -->
+      <div class="blockh">LATENCY BUDGET · Claude emits a turn → cockpit shows new cost · ~120ms total</div>
+      <div class="latency">
+        <div class="lbar">
+          <div class="seg s1" style="width: 18%">28ms</div>
+          <div class="seg s2" style="width: 12%">15ms</div>
+          <div class="seg s3" style="width: 32%">50ms</div>
+          <div class="seg s4" style="width: 18%">22ms</div>
+          <div class="seg s5" style="width: 20%">25ms</div>
+        </div>
+        <div class="lbar-x"><span>0ms</span><span>~120ms total</span></div>
+        <div class="lbar-legend">
+          <div class="lc"><i style="background: rgba(56,189,248,0.6)"></i><span class="lcl">Claude → stdout</span></div>
+          <div class="lc"><i style="background: rgba(167,139,250,0.5)"></i><span class="lcl">parse + JSONL write</span></div>
+          <div class="lc"><i style="background: rgba(52,211,153,0.5)"></i><span class="lcl">fsevents → server</span></div>
+          <div class="lc"><i style="background: rgba(251,191,36,0.5)"></i><span class="lcl">aggregator + SSE emit</span></div>
+          <div class="lc"><i style="background: rgba(244,114,182,0.5)"></i><span class="lcl">browser paint</span></div>
+        </div>
+      </div>
+
+      <!-- ───── WHAT'S CACHED WHERE ───── -->
+      <div class="blockh">WHO HOLDS WHAT · the four tiers, no DB</div>
+      <div class="ttab">
+        <table>
+          <tr><th>Tier</th><th>Where</th><th>What it holds · how it's used</th></tr>
+          <tr>
+            <td>Source of truth</td>
+            <td>disk JSONL</td>
+            <td>Append-only token events per slice. Replayable. Survives restart. Compactable into a daily rollup if files ever get huge (years out).</td>
+          </tr>
+          <tr>
+            <td>Server hot cache</td>
+            <td>Python dict in RAM</td>
+            <td>All aggregates: per-slice, per-sprint, per-day, per-week, per-30d, lifetime. ~3MB for a 6-month-old project. Rebuilt on cold start from JSONL.</td>
+          </tr>
+          <tr>
+            <td>Wire</td>
+            <td>SSE event</td>
+            <td>Two event types: <code>state-update</code> (slice transitions) and <code>metric-tick</code> (token deltas + fresh rollups). Browser is "dumb client".</td>
+          </tr>
+          <tr>
+            <td>Browser store</td>
+            <td>plain JS object</td>
+            <td>Mirror of relevant slice / sprint / project rollups. Patched by SSE events. Single-source: never queries server, only receives.</td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- ───── WHY NO DB ───── -->
+      <div class="blockh purple">WHY NO DB · the question you asked</div>
+      <div class="ttab">
+        <table>
+          <tr><th>Concern</th><th>Without DB</th><th>With SQLite</th></tr>
+          <tr>
+            <td>Cold-start latency</td>
+            <td>~1–2s scan of JSONL (6-mo project, ~50MB total)</td>
+            <td>~50ms · one query</td>
+          </tr>
+          <tr>
+            <td>Per-event latency</td>
+            <td>~50ms total (write + parse + agg + emit)</td>
+            <td>~50ms · same path + extra row insert</td>
+          </tr>
+          <tr>
+            <td>Disk footprint</td>
+            <td>JSONL is the file · readable in any editor</td>
+            <td>+1 binary SQLite file · same data, opaque</td>
+          </tr>
+          <tr>
+            <td>Debugging</td>
+            <td><code>tail -f *.tokens.jsonl</code> · trivial</td>
+            <td>Need <code>sqlite3</code> CLI or DB tool</td>
+          </tr>
+          <tr>
+            <td>Time-window queries</td>
+            <td>In-memory rollups are O(1) reads · pre-aggregated</td>
+            <td>Indexed SQL · also O(1) for hot keys</td>
+          </tr>
+          <tr>
+            <td>Reset / wipe a project</td>
+            <td><code>rm -rf .naml/sprints/&lt;id&gt;</code></td>
+            <td>DELETE FROM rows + rm files (two steps to keep in sync)</td>
+          </tr>
+          <tr>
+            <td>Backup</td>
+            <td>Already part of <code>git</code> if tracked, or trivial <code>tar</code></td>
+            <td>Need SQLite-aware backup (BEGIN IMMEDIATE)</td>
+          </tr>
+          <tr>
+            <td>Concurrent writers</td>
+            <td>Each lane appends to its own JSONL · zero contention</td>
+            <td>SQLite WAL handles it, but it's contention you didn't have</td>
+          </tr>
+          <tr>
+            <td>Multi-tab / multi-server</td>
+            <td>Server is the only reader · no problem</td>
+            <td>Same</td>
+          </tr>
+          <tr>
+            <td>Future: cross-project rollups</td>
+            <td>Scan all <code>.naml/</code> dirs on cold start · still &lt; 5s</td>
+            <td>Single SQL query — slightly faster</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="verdict-banner" style="margin-top: 14px;">
+        <strong>The one case where SQLite would earn its keep:</strong> if you ever want <em>cross-project</em> historical analytics in the UI ("show me my last 6 months across all projects, ranked by cost-per-merged-PR"). Today: cockpit is per-project, so no. If you add an "All Projects" view later, revisit then. Easy to bolt SQLite on as a materialized view over the JSONL when needed — JSONL stays source of truth.
+      </div>
+
+      <!-- ───── EDGE CASES ───── -->
+      <div class="blockh">EDGE CASES THIS COVERS</div>
+      <div class="ttab">
+        <table>
+          <tr><th>Case</th><th>Behaviour</th></tr>
+          <tr>
+            <td>Server crashes mid-sprint</td>
+            <td>JSONL on disk is intact. Restart → cold replay → exactly where we left off.</td>
+          </tr>
+          <tr>
+            <td>Browser refreshes mid-sprint</td>
+            <td>EventSource reconnects. Server's first event is a full snapshot of current state + rollups. Then deltas.</td>
+          </tr>
+          <tr>
+            <td>Lane crashes (Claude session dies)</td>
+            <td>JSONL has events up to the crash. Slice marked failed. Aggregates still correct because no event is double-counted.</td>
+          </tr>
+          <tr>
+            <td>Manual JSONL edit (you fix a bad row)</td>
+            <td>fsevents fires → server detects file rewrite → replay from scratch for that file → re-emit corrected rollups.</td>
+          </tr>
+          <tr>
+            <td>Disk fills up</td>
+            <td>JSONL write fails → lane logs error, retries → if persistent, sprint pauses with diagnostic. Aggregates frozen at last successful write.</td>
+          </tr>
+          <tr>
+            <td>Years go by, JSONL files get big</td>
+            <td>Periodic compaction job: any sprint &gt; 90 days old gets its JSONL replaced with a single <code>summary.jsonl</code> line. Aggregates unchanged. (Not needed for v1.)</td>
+          </tr>
+        </table>
+      </div>
+
+    </div>
+  </article>
+
+  <footer class="qfoot">
+    <strong>Sign off on this architecture?</strong> Or argue any tier.
+    <div class="ask">
+      Two concrete decisions to make:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Claude output mode</strong> — confirm: lanes spawn <code>claude -p --output-format stream-json</code> so we get per-turn <code>usage</code> blocks. Roadmap Phase A already calls for this. Without it, we get cost only at session end, which kills live cost telemetry.</li>
+        <li><strong>Context-window %</strong> — derive from <code>tokens_in + cache_read</code> running total ÷ model max (e.g. 200k for Sonnet 4.6). Confirm we use the model's context window from <code>config.toml</code>, not a hardcoded constant.</li>
+        <li><strong>"Lifetime" origin</strong> — first JSONL event we ever see for this project. So lifetime starts the moment the first slice runs. OK?</li>
+        <li><strong>Cross-project aggregates</strong> (account-level "today $") — server scans <em>all</em> <code>~/Desktop/Naml/projects</code> JSONL files OR we have a single global <code>~/.naml/usage.jsonl</code> that every lane also appends to. My pick: scan all per-project JSONLs on cold start (no double-write); cache the cross-project aggregate in RAM.</li>
+        <li><strong>Compaction</strong> — defer to v2. JSONL files stay raw until they become a problem (won't for years on a personal tool).</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

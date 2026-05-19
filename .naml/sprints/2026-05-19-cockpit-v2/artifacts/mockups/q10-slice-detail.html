@@ -1,0 +1,998 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q10 — Slice detail drawer · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 16px; min-height: 0; background: var(--bg-0); }
+
+    /* simulated cockpit background behind the drawer */
+    .stage {
+      position: relative;
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 760px;
+    }
+    .stage .dim {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(1px);
+      z-index: 5;
+    }
+    .stage .bg-content {
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 10px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* mini sprint state stepper in background */
+    .bg-stepper {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 0;
+    }
+    .bg-stepper .bs {
+      flex: 1; text-align: center;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); letter-spacing: 0.1em;
+      position: relative;
+    }
+    .bg-stepper .bs .bdot {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: var(--bg-3); border: 2px solid var(--border);
+      margin: 0 auto 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px;
+      color: var(--text-3);
+    }
+    .bg-stepper .bs.done .bdot { background: var(--c-accent-2); border-color: var(--c-accent-2); color: #04201a; }
+    .bg-stepper .bs.curr .bdot {
+      background: var(--c-accent); border-color: var(--c-accent); color: #052735;
+      box-shadow: 0 0 10px var(--c-accent);
+    }
+    .bg-stepper .bs.curr { color: var(--c-accent); }
+    .bg-stepper .bs::after {
+      content: ''; position: absolute;
+      top: 9px; left: 50%; width: 100%; height: 2px;
+      background: var(--border);
+      z-index: -1;
+    }
+    .bg-stepper .bs.done::after, .bg-stepper .bs.curr::after { background: var(--c-accent-2); }
+    .bg-stepper .bs:last-child::after { display: none; }
+
+    /* mini lane row with embedded slice card */
+    .bg-lane {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+    .bg-lane.active { border-color: rgba(56,189,248,0.3); }
+    .bg-lane .blane-name {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-1);
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .bg-lane .blane-name .pp {
+      font-size: 8.5px;
+      color: var(--c-accent);
+      letter-spacing: 0.1em;
+    }
+
+    /* mini slice card sitting on the lane row */
+    .bg-slice {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      padding: 7px 10px;
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-1);
+      position: relative;
+    }
+    .bg-slice::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+      background: var(--c-work);
+      border-radius: 6px 0 0 6px;
+    }
+    .bg-slice .bsid {
+      color: var(--c-accent); font-size: 9.5px;
+      background: rgba(56,189,248,0.08);
+      padding: 1px 5px; border-radius: 3px;
+    }
+    .bg-slice .bttl {
+      color: var(--text-0);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .bg-slice .bpill {
+      font-size: 8.5px; padding: 1px 5px; border-radius: 999px;
+      letter-spacing: 0.08em;
+      background: rgba(56,189,248,0.15); color: var(--c-work);
+    }
+    .bg-slice .bopen {
+      font-size: 9.5px;
+      color: var(--c-accent);
+      padding: 2px 6px;
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.25);
+      border-radius: 3px;
+    }
+    /* the "clicked" slice card gets a glow so the source of the drawer is obvious */
+    .bg-slice.opened {
+      border-color: var(--c-accent);
+      box-shadow: 0 0 0 1px rgba(56,189,248,0.5), 0 0 14px rgba(56,189,248,0.3);
+      background: rgba(56,189,248,0.08);
+      z-index: 8;
+    }
+    .bg-slice.opened::before { background: var(--c-accent); box-shadow: 0 0 8px var(--c-accent); }
+    .bg-slice.opened .bopen {
+      background: var(--c-accent); color: #052735; font-weight: 700;
+    }
+
+    .bg-queue {
+      background: var(--bg-1);
+      border: 1px dashed var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+    .bg-queue b { color: var(--text-1); font-weight: 600; }
+
+    .bg-rail {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-2);
+      display: flex; gap: 10px;
+      align-items: center;
+    }
+    .bg-rail .seg b { color: var(--text-0); font-weight: 600; }
+    .bg-rail .div { width: 1px; height: 14px; background: var(--border-soft); }
+
+    /* connector arrow from clicked slice to drawer */
+    .connector {
+      position: absolute;
+      z-index: 9;
+      pointer-events: none;
+      color: var(--c-accent);
+      font-family: var(--mono); font-size: 9px;
+      letter-spacing: 0.1em;
+    }
+
+    /* ─────── DRAWER (Option A) ─────── */
+    .drawer {
+      position: absolute;
+      top: 0; right: 0; bottom: 0;
+      width: 55%;
+      background: var(--bg-1);
+      border-left: 2px solid var(--c-accent);
+      box-shadow: -16px 0 40px rgba(0,0,0,0.55), -2px 0 0 rgba(56,189,248,0.4);
+      z-index: 10;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+    }
+    .dhd {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-soft);
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      display: flex; align-items: flex-start; gap: 14px;
+    }
+    .dhd .grow { flex: 1; min-width: 0; }
+    .dhd .sid {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--c-accent);
+      background: rgba(56,189,248,0.1);
+      padding: 3px 8px; border-radius: 4px;
+      display: inline-block;
+      margin-bottom: 6px;
+    }
+    .dhd h2 {
+      margin: 0; font-size: 18px; color: var(--text-0); font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .dhd .meta {
+      margin-top: 6px;
+      display: flex; gap: 10px; align-items: center;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .dhd .pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 8px; border-radius: 999px;
+      font-family: var(--mono); font-size: 10px;
+      letter-spacing: 0.08em;
+    }
+    .pill.work { background: rgba(56,189,248,0.15); color: var(--c-work); }
+    .pill.work .pd { width: 6px; height: 6px; background: var(--c-work); border-radius: 50%; box-shadow: 0 0 5px var(--c-work); animation: pulse 2s ease-in-out infinite; }
+    .pill.afk { background: rgba(56,189,248,0.1); color: var(--c-accent); }
+    .pill.lane { background: var(--bg-3); color: var(--text-1); }
+    .dhd .close {
+      background: var(--bg-2); border: 1px solid var(--border);
+      color: var(--text-2);
+      width: 30px; height: 30px;
+      border-radius: 6px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .dhd .close:hover { color: var(--text-0); border-color: var(--c-accent); }
+
+    .dactions {
+      padding: 10px 18px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border-soft);
+      display: flex; gap: 8px;
+      flex-wrap: wrap;
+    }
+    .actbtn {
+      padding: 7px 12px;
+      border-radius: 5px;
+      font-family: var(--mono); font-size: 11px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .actbtn.primary { background: var(--c-accent); color: #052735; font-weight: 700; }
+    .actbtn.ghost { background: var(--bg-3); color: var(--text-1); border-color: var(--border); }
+    .actbtn.warn { background: rgba(251,191,36,0.15); color: var(--c-warn); border-color: rgba(251,191,36,0.3); }
+    .actbtn.danger { background: rgba(248,113,113,0.12); color: var(--c-failed); border-color: rgba(248,113,113,0.3); }
+    .actbtn.disabled {
+      background: var(--bg-2);
+      color: var(--text-3);
+      border-color: var(--border-soft);
+      cursor: not-allowed;
+      position: relative;
+    }
+    .actbtn.disabled::after {
+      content: '🔒';
+      font-size: 9px;
+      margin-left: 4px;
+      opacity: 0.7;
+    }
+
+    .gate-note {
+      margin: 0 18px 12px;
+      padding: 10px 14px;
+      background: rgba(251,191,36,0.06);
+      border: 1px solid rgba(251,191,36,0.25);
+      border-radius: 6px;
+      font-size: 11.5px;
+      color: var(--text-1);
+      line-height: 1.5;
+      display: flex; gap: 10px;
+      align-items: flex-start;
+    }
+    .gate-note .gico {
+      font-size: 14px;
+      color: var(--c-warn);
+      flex-shrink: 0;
+    }
+    .gate-note code {
+      background: var(--bg-0); padding: 1px 5px; border-radius: 3px;
+      font-size: 10.5px;
+    }
+    .gate-note .gpath {
+      margin-top: 6px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-2);
+    }
+    .gate-note .gpath b {
+      color: var(--c-accent);
+      padding: 1px 6px; border-radius: 3px;
+      background: rgba(56,189,248,0.1);
+    }
+
+    .dbody {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 18px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+
+    /* section block */
+    .sect {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .sect .sh {
+      padding: 10px 14px;
+      background: var(--bg-3);
+      border-bottom: 1px solid var(--border-soft);
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.14em;
+      display: flex; justify-content: space-between; align-items: baseline;
+    }
+    .sect .sh .extra { color: var(--text-1); font-size: 10px; }
+    .sect .sb { padding: 12px 14px; }
+
+    /* overview grid */
+    .ogrid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .ogrid .k {
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3); letter-spacing: 0.1em;
+      margin-bottom: 3px;
+    }
+    .ogrid .v {
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--text-0);
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .ogrid .v.warn { color: var(--c-warn); }
+    .ogrid .v.ok { color: var(--c-accent-2); }
+    .ogrid .v .copy {
+      color: var(--text-3); margin-left: 6px; cursor: pointer;
+      font-size: 10px;
+    }
+    .ogrid .v .copy:hover { color: var(--c-accent); }
+
+    /* AC checklist */
+    .ac {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .ac .ac-item {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 11.5px; color: var(--text-1);
+      line-height: 1.5;
+    }
+    .ac .ac-item .box {
+      width: 14px; height: 14px;
+      flex-shrink: 0; margin-top: 2px;
+      border-radius: 3px;
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 10px;
+    }
+    .ac .ac-item.done .box { background: var(--c-accent-2); border-color: var(--c-accent-2); color: #04201a; }
+    .ac .ac-item.done .t { text-decoration: line-through; color: var(--text-3); }
+    .ac .ac-item.run .box { border-color: var(--c-work); color: var(--c-work); }
+
+    /* state timeline */
+    .timeline {
+      position: relative;
+      padding-left: 0;
+    }
+    .timeline .tspine {
+      position: absolute;
+      top: 14px; bottom: 14px;
+      left: 11px;
+      width: 2px; background: var(--border);
+    }
+    .tevent {
+      position: relative;
+      padding-left: 28px;
+      padding-bottom: 14px;
+    }
+    .tevent:last-child { padding-bottom: 0; }
+    .tevent::before {
+      content: '';
+      position: absolute;
+      left: 5px; top: 4px;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--bg-3);
+      border: 2px solid var(--border);
+      box-sizing: border-box;
+    }
+    .tevent.done::before { background: var(--c-accent-2); border-color: var(--c-accent-2); }
+    .tevent.current::before {
+      background: var(--c-accent); border-color: var(--c-accent);
+      box-shadow: 0 0 0 4px rgba(56,189,248,0.2);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .tevent.retry::before { background: var(--c-warn); border-color: var(--c-warn); }
+    .tevent .head {
+      display: flex; align-items: baseline; gap: 10px;
+      font-family: var(--mono); font-size: 11px;
+    }
+    .tevent .nm { color: var(--text-0); font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; }
+    .tevent.done .nm { color: var(--text-1); }
+    .tevent.current .nm { color: var(--c-accent); }
+    .tevent.retry .nm { color: var(--c-warn); }
+    .tevent .ts { color: var(--text-3); font-size: 10px; }
+    .tevent .dur { color: var(--text-2); font-size: 10px; margin-left: auto; }
+    .tevent .detail {
+      color: var(--text-2);
+      font-size: 11px;
+      margin-top: 4px;
+      line-height: 1.45;
+    }
+    .tevent .detail .badge {
+      display: inline-block;
+      padding: 1px 6px; border-radius: 3px;
+      font-family: var(--mono); font-size: 9px;
+      letter-spacing: 0.08em;
+      background: rgba(248,113,113,0.12); color: var(--c-failed);
+      margin-right: 6px;
+    }
+
+    /* gate output */
+    .gate-out {
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-1);
+      line-height: 1.5;
+      max-height: 160px;
+      overflow: auto;
+      white-space: pre;
+    }
+    .gate-out .err { color: var(--c-failed); }
+    .gate-out .warn { color: var(--c-warn); }
+    .gate-out .ok { color: var(--c-accent-2); }
+
+    /* review verdict */
+    .vbox {
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: rgba(251,191,36,0.06);
+      border: 1px solid rgba(251,191,36,0.25);
+    }
+    .vbox .vhd {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.12em;
+      margin-bottom: 6px;
+    }
+    .vbox .vbadge {
+      padding: 2px 6px; border-radius: 3px;
+      font-family: var(--mono); font-size: 9.5px; font-weight: 700;
+      letter-spacing: 0.1em;
+    }
+    .vbadge.lgtm { background: rgba(52,211,153,0.18); color: var(--c-accent-2); }
+    .vbadge.changes { background: rgba(251,191,36,0.18); color: var(--c-warn); }
+    .vbox .vbody {
+      color: var(--text-1); font-size: 11.5px;
+      line-height: 1.55;
+    }
+    .vbox .vbody code {
+      background: var(--bg-0); padding: 1px 5px; border-radius: 3px;
+      font-size: 10.5px;
+    }
+
+    /* sub options (B + C) ─────── */
+    .modal-stage {
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px;
+      min-height: 280px;
+      position: relative;
+    }
+    .modal {
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      min-height: 220px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+    }
+    .inline-stage .lane-row.expanded {
+      height: 280px;
+      background: linear-gradient(180deg, rgba(56,189,248,0.05), var(--bg-1));
+      border-color: rgba(56,189,248,0.35);
+      padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 8px;
+      color: var(--text-1);
+      font-size: 10.5px;
+    }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 10 / Slice detail</div>
+      <h1>What happens when you click "OPEN ↗" on a slice?</h1>
+      <div class="qsub">
+        Every slice card has an "OPEN" affordance. Behind it is the deepest view in the cockpit — full state-machine traversal, acceptance criteria, review verdict, gate output, retry log, and intervention controls. Trade-off: how much to show vs. how much context to keep around it.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q9-settings.html">← Q9</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — right-side drawer (~60% width) sliding in over the dimmed cockpit.</strong>
+      Keeps the lane grid + sprint state visible underneath (peripheral context), gives the drawer a generous canvas for timeline + gate output + review verdict. Click outside to close. <code>esc</code> closes. Action bar at top (Open in terminal · Resume A1 session · Mark failed · Skip) is the intervention surface — most of the time you open the drawer to <em>do</em> something, not just read.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── A: DRAWER (RECOMMENDED) ─────────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Right-side drawer · 60% width · dim+blur underneath</h2>
+      </div>
+      <div class="option-preview">
+
+        <div class="stage">
+          <!-- realistic sprint view in background (this is what you'd see before clicking OPEN) -->
+          <div class="bg-content">
+
+            <!-- top: sprint state stepper (the Q4 viz) -->
+            <div class="bg-stepper">
+              <div class="bs done"><div class="bdot">✓</div>PLANNING</div>
+              <div class="bs done"><div class="bdot">✓</div>PUBLISHING</div>
+              <div class="bs curr"><div class="bdot">▶</div>EXECUTING<br><span style="color: var(--text-3); font-size: 8px;">21m · 5/8</span></div>
+              <div class="bs"><div class="bdot">3</div>AWAITING</div>
+              <div class="bs"><div class="bdot">4</div>MERGING</div>
+              <div class="bs"><div class="bdot">5</div>COMPLETE</div>
+            </div>
+
+            <!-- lane swimlanes with slice cards on them -->
+            <div class="bg-lane">
+              <div class="blane-name"><span>lane-1</span><span class="pp">REVIEW</span></div>
+              <div class="bg-slice">
+                <span class="bsid">slice-3</span>
+                <span class="bttl">Render config schema validator</span>
+                <span class="bpill" style="background: rgba(251,191,36,0.15); color: var(--c-review);">REVIEW</span>
+                <span class="bopen">OPEN ↗</span>
+              </div>
+            </div>
+
+            <div class="bg-lane active">
+              <div class="blane-name"><span>lane-2</span><span class="pp">WORK</span></div>
+              <!-- THIS is the clicked card — glowing — drawer slides in from this card -->
+              <div class="bg-slice opened">
+                <span class="bsid">slice-4</span>
+                <span class="bttl">HTML renderer with mock-target snapshot</span>
+                <span class="bpill">WORK</span>
+                <span class="bopen">OPEN ↗</span>
+              </div>
+            </div>
+
+            <div class="bg-lane">
+              <div class="blane-name"><span>lane-3</span><span class="pp" style="color: var(--text-3);">IDLE</span></div>
+              <div class="bg-slice" style="opacity: 0.7;">
+                <span class="bsid">slice-2</span>
+                <span class="bttl">Config schema + golden tests</span>
+                <span class="bpill" style="background: rgba(52,211,153,0.15); color: var(--c-merged);">MERGED ✓</span>
+                <span class="bopen" style="color: var(--text-2)">VIEW</span>
+              </div>
+            </div>
+
+            <div class="bg-queue">
+              <span style="color: var(--text-3);">QUEUE ·</span> <b>slice-5</b> blocked on slice-4 · <b>slice-6</b> ready → lane-1 · <b>slice-7</b> ready → lane-2
+            </div>
+
+            <div class="bg-rail">
+              <span class="seg">SPRINT</span>
+              <span class="seg">elapsed <b>21m 14s</b></span>
+              <span class="div"></span>
+              <span class="seg">eta <b>~14m</b></span>
+              <span class="div"></span>
+              <span class="seg">cost <b>$2.41</b></span>
+              <span class="div"></span>
+              <span class="seg">lanes <b>3/3</b></span>
+              <span class="div"></span>
+              <span class="seg">slices <b>5/8</b></span>
+            </div>
+
+          </div>
+          <div class="dim"></div>
+
+          <!-- connector — "drawer opened from this card" -->
+          <div class="connector" style="top: 152px; left: 38%;">
+            ↗ this card opened the drawer
+          </div>
+
+          <!-- THE DRAWER -->
+          <div class="drawer">
+
+            <!-- header -->
+            <div class="dhd">
+              <div class="grow">
+                <span class="sid">slice-4</span>
+                <h2>HTML renderer with mock-target snapshot</h2>
+                <div class="meta">
+                  <span class="pill work"><span class="pd"></span>WORK</span>
+                  <span class="pill afk">AFK</span>
+                  <span class="pill lane">lane-2</span>
+                  <span>·</span>
+                  <span>started 14:17:43 · 6m12s</span>
+                  <span>·</span>
+                  <span>sprint <span style="color: var(--text-0)">2026-05-19-html-renderer</span></span>
+                </div>
+              </div>
+              <span class="close">×</span>
+            </div>
+
+            <!-- action bar -->
+            <div class="dactions">
+              <span class="actbtn disabled" title="Slice is in WORK · resuming the session in a terminal would interrupt naml's run. HOLD first.">▶ OPEN IN TERMINAL</span>
+              <span class="actbtn ghost">⎘ copy session-id</span>
+              <span class="actbtn ghost">⎇ checkout branch</span>
+              <span class="actbtn ghost">↗ view PR (when ready)</span>
+              <span style="flex: 1"></span>
+              <span class="actbtn warn">⏸ HOLD &amp; UNLOCK TERMINAL</span>
+              <span class="actbtn danger">✕ MARK FAILED</span>
+              <span class="actbtn ghost">⏭ SKIP</span>
+            </div>
+
+            <!-- gating note -->
+            <div class="gate-note">
+              <span class="gico">⚠</span>
+              <div>
+                <strong>"Open in terminal" is locked while naml owns the session.</strong>
+                Resuming this slice's Claude session from a separate terminal would yank the conversation out from under the lane worker and corrupt the run. The button unlocks automatically when the slice transitions to a resting state.
+                <div class="gpath">
+                  LOCKED in: <code>setup · work · pr</code> &nbsp;·&nbsp;
+                  UNLOCKED in: <b>held</b> · <b>review</b> · <b>merged</b> · <b>failed</b> · <b>needs_human_review</b> · <b>abandoned</b>
+                </div>
+              </div>
+            </div>
+
+            <!-- body -->
+            <div class="dbody">
+
+              <!-- overview -->
+              <div class="sect">
+                <div class="sh"><span>OVERVIEW</span><span class="extra">all live data</span></div>
+                <div class="sb">
+                  <div class="ogrid">
+                    <div>
+                      <div class="k">SESSION ID</div>
+                      <div class="v"><code>9b0c-4a82-f3d8-ef13</code><span class="copy">⎘</span></div>
+                    </div>
+                    <div>
+                      <div class="k">BRANCH</div>
+                      <div class="v"><code>naml/slice-4-html-renderer</code><span class="copy">⎘</span></div>
+                    </div>
+                    <div>
+                      <div class="k">WORKTREE</div>
+                      <div class="v"><code>~/Library/Logs/agents-orchestrator/wt/lane-2</code></div>
+                    </div>
+                    <div>
+                      <div class="k">DEPENDS ON</div>
+                      <div class="v" style="color: var(--c-accent-2)">slice-2 ✓ · slice-3 ⏵</div>
+                    </div>
+                    <div>
+                      <div class="k">TOUCHES</div>
+                      <div class="v"><code>src/render/html/** · tests/render/html/**</code></div>
+                    </div>
+                    <div>
+                      <div class="k">PR</div>
+                      <div class="v" style="color: var(--text-3)">not yet open</div>
+                    </div>
+                    <div>
+                      <div class="k">COST · TOKENS</div>
+                      <div class="v">$0.41 · 82k in / 14k out / 1.2M cache</div>
+                    </div>
+                    <div>
+                      <div class="k">CONTEXT WINDOW</div>
+                      <div class="v warn">73% · 146k / 200k</div>
+                    </div>
+                    <div>
+                      <div class="k">RETRY · WORK STATE</div>
+                      <div class="v warn">1 of 2</div>
+                    </div>
+                    <div>
+                      <div class="k">DURATION · IN STATE</div>
+                      <div class="v">6m 12s · ~9m budget</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- acceptance criteria -->
+              <div class="sect">
+                <div class="sh"><span>ACCEPTANCE CRITERIA</span><span class="extra">3 of 5 verified</span></div>
+                <div class="sb">
+                  <div class="ac">
+                    <div class="ac-item done"><span class="box">✓</span><span class="t">Renderer accepts the V2 config schema from <code>slice-3</code></span></div>
+                    <div class="ac-item done"><span class="box">✓</span><span class="t">Output matches the mock-target snapshot in <code>artifacts/mock-output.html</code></span></div>
+                    <div class="ac-item done"><span class="box">✓</span><span class="t">Uses <code>&lt;strong&gt;</code> tags, not <code>&lt;b&gt;</code> (accessibility)</span></div>
+                    <div class="ac-item run"><span class="box">▶</span><span class="t">All snapshot tests in <code>tests/render/snapshots/</code> pass — <span style="color: var(--c-warn)">typecheck failing</span></span></div>
+                    <div class="ac-item"><span class="box"></span><span class="t">Renders in storybook under <code>render/HtmlRenderer</code></span></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- state machine timeline -->
+              <div class="sect">
+                <div class="sh"><span>STATE MACHINE · traversal</span><span class="extra">live</span></div>
+                <div class="sb">
+                  <div class="timeline">
+                    <div class="tspine"></div>
+                    <div class="tevent done">
+                      <div class="head">
+                        <span class="nm">SETUP</span>
+                        <span class="ts">14:17:43</span>
+                        <span class="dur">+4s</span>
+                      </div>
+                      <div class="detail">Worktree provisioned · branch <code>naml/slice-4-html-renderer</code> created from main</div>
+                    </div>
+                    <div class="tevent done">
+                      <div class="head">
+                        <span class="nm">WORK</span>
+                        <span class="ts">14:17:47</span>
+                        <span class="dur">4m 30s</span>
+                      </div>
+                      <div class="detail">Implementer A1 spawned · session <code>9b0c…ef13</code> · 11 turns · gates green up to typecheck</div>
+                    </div>
+                    <div class="tevent retry">
+                      <div class="head">
+                        <span class="nm">WORK · RETRY 1/2</span>
+                        <span class="ts">14:22:17</span>
+                        <span class="dur">resume</span>
+                      </div>
+                      <div class="detail">
+                        <span class="badge">GATE FAIL</span>
+                        typecheck failed · resume sent with stderr · A1 session re-entered
+                      </div>
+                    </div>
+                    <div class="tevent current">
+                      <div class="head">
+                        <span class="nm">WORK</span>
+                        <span class="ts">14:22:18</span>
+                        <span class="dur" style="color: var(--c-accent)">running · 1m 41s</span>
+                      </div>
+                      <div class="detail">A1 reasoning about <code>renderer.ts</code> type mismatch · 3 turns since resume</div>
+                    </div>
+                    <div class="tevent">
+                      <div class="head">
+                        <span class="nm" style="color: var(--text-3)">PR</span>
+                      </div>
+                    </div>
+                    <div class="tevent">
+                      <div class="head">
+                        <span class="nm" style="color: var(--text-3)">REVIEW</span>
+                      </div>
+                    </div>
+                    <div class="tevent">
+                      <div class="head">
+                        <span class="nm" style="color: var(--text-3)">MERGED</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- latest gate output -->
+              <div class="sect">
+                <div class="sh"><span>LATEST GATE OUTPUT</span><span class="extra">typecheck · 14:22:14</span></div>
+                <div class="sb">
+                  <div class="gate-out"><span class="warn">▶ pnpm typecheck</span>
+
+src/render/html/renderer.ts:42:18 - <span class="err">error TS2345</span>: Argument of type
+  'SchemaConfig | undefined' is not assignable to parameter of type 'SchemaConfig'.
+  Type 'undefined' is not assignable to type 'SchemaConfig'.
+
+42     return formatNode(node.config, ctx);
+                          ~~~~~~~~~~~
+
+Found 1 error in src/render/html/renderer.ts:42
+
+<span class="err">✗ typecheck failed (exit 1)</span>
+<span class="warn">⏵ resuming A1 with error context (retry 1/2)</span></div>
+                </div>
+              </div>
+
+              <!-- auto-review verdict (placeholder until PR opens) -->
+              <div class="sect">
+                <div class="sh"><span>AUTO-REVIEW</span><span class="extra">pending · slice not yet at PR</span></div>
+                <div class="sb">
+                  <div class="vbox" style="opacity: 0.6">
+                    <div class="vhd">
+                      <span>VERDICT</span>
+                      <span class="vbadge changes">PENDING</span>
+                    </div>
+                    <div class="vbody">
+                      Auto-reviewer (A2-fresh) will spawn when this slice reaches the <code>pr</code> state. It reviews against the acceptance criteria above, the slice spec, and the parent ADRs.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- notes from grilling -->
+              <div class="sect">
+                <div class="sh"><span>NOTES FROM GRILLING SESSION</span><span class="extra">slices/slice-4.md</span></div>
+                <div class="sb" style="color: var(--text-1); font-size: 11.5px; line-height: 1.55;">
+                  Renderer must round-trip the mock-target HTML exactly — no semantic differences. Pay attention to <code>&lt;strong&gt;</code> vs <code>&lt;b&gt;</code> (accessibility ask from the feedback inbox). Snapshot tests live in <code>tests/render/snapshots/</code>; regenerate with <code>pnpm test -- --update-snapshot</code> only if the AC explicitly says so. The HTML renderer is the slice that unlocks the eval harness in <code>slice-5</code>.
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="option-body">
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Cockpit context visible behind (dim+blur)</li>
+              <li>Generous canvas for timeline + gate output</li>
+              <li>Action bar makes intervention one-click</li>
+              <li>"Open in terminal" gated so users can't corrupt a live run</li>
+              <li>Drawer scrolls independently of underlying view</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>~55% width covers half the cockpit</li>
+              <li>Hard to compare two slices side-by-side</li>
+              <li>HOLD step adds friction when you legitimately need to intervene</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="sect" style="margin-top: 14px;">
+          <div class="sh"><span>OPEN-IN-TERMINAL · GATING LOGIC</span><span class="extra">why this matters</span></div>
+          <div class="sb" style="font-size: 11.5px; color: var(--text-1); line-height: 1.6;">
+            <p style="margin: 0 0 8px;">Claude sessions are <strong>single-owner</strong>. If naml's lane worker is mid-conversation with a session and you run <code>claude --resume &lt;id&gt;</code> in a terminal, the conversation gets pulled into your terminal and the lane's process loses its handle on it — the run is effectively interrupted and the slice can end in a corrupt state.</p>
+            <p style="margin: 0 0 8px;">So the button is gated by slice state:</p>
+            <ul style="margin: 0 0 8px; padding-left: 20px;">
+              <li><strong>Locked</strong> in <code>setup · work · pr</code> — naml is actively driving the session.</li>
+              <li><strong>Unlocked</strong> in <code>held · review · merged · failed · needs_human_review · abandoned · blocked_upstream</code> — implementer session is at rest.</li>
+            </ul>
+            <p style="margin: 0;"><strong>HOLD &amp; UNLOCK TERMINAL</strong> is the safe intervention path mid-run. It (1) signals the lane to stop starting new turns, (2) waits for the in-flight turn to settle, (3) flips state to <code>held</code>, (4) unlocks the terminal button. RESUME from <code>held</code> re-engages naml.</p>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── B: FULL MODAL ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Full-screen modal · all width, no context</h2>
+      </div>
+      <div class="option-preview">
+        <div class="modal-stage">
+          <div class="modal">
+            <div class="dhd" style="padding: 0 0 12px 0; border: none; background: transparent;">
+              <div class="grow">
+                <span class="sid">slice-4</span>
+                <h2>HTML renderer with mock-target snapshot</h2>
+                <div class="meta">
+                  <span class="pill work"><span class="pd"></span>WORK</span>
+                  <span class="pill afk">AFK</span>
+                  <span>·</span>
+                  <span>6m12s · sprint html-renderer</span>
+                </div>
+              </div>
+              <span class="close">×</span>
+            </div>
+            <div class="dactions" style="padding: 8px 0; background: transparent; border: none;">
+              <span class="actbtn primary">▶ OPEN IN TERMINAL</span>
+              <span class="actbtn ghost">⎘ session</span>
+              <span class="actbtn warn">⏸ HOLD</span>
+              <span class="actbtn danger">✕ FAIL</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 10px;">
+              <div class="sect"><div class="sh">OVERVIEW</div><div class="sb" style="height: 120px;"></div></div>
+              <div class="sect"><div class="sh">TIMELINE</div><div class="sb" style="height: 120px;"></div></div>
+              <div class="sect" style="grid-column: 1 / -1;"><div class="sh">GATE OUTPUT</div><div class="sb" style="height: 80px;"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Full-screen overlay. More canvas, two-column layout possible. But loses cockpit context entirely — when the drawer opens you can't see if another lane just finished. Feels disconnected from the live run.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Most canvas</li>
+              <li>Two-column layout possible</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Loses cockpit context completely</li>
+              <li>Heavy-feeling — modals interrupt flow</li>
+              <li>No peripheral peripheral awareness</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── C: INLINE EXPAND ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Inline expansion · slice card grows in place</h2>
+      </div>
+      <div class="option-preview">
+        <div class="modal-stage inline-stage">
+          <div class="bg-content" style="padding: 0;">
+            <div class="lane-row" style="margin-bottom: 8px"></div>
+            <div class="lane-row expanded" style="margin-bottom: 8px;">
+              <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                <span class="sid" style="display: inline-block;">slice-4</span>
+                <span style="color: var(--text-0); font-weight: 600;">HTML renderer with mock-target snapshot</span>
+                <span class="pill work"><span class="pd"></span>WORK</span>
+                <span style="margin-left: auto; color: var(--text-3); cursor: pointer;">▴ collapse</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div class="sect"><div class="sh">OVERVIEW</div><div class="sb" style="height: 90px;"></div></div>
+                <div class="sect"><div class="sh">TIMELINE</div><div class="sb" style="height: 90px;"></div></div>
+              </div>
+            </div>
+            <div class="lane-row"></div>
+            <div class="lane-row"></div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Card expands in place; other cards push down. No overlay. Good for a quick peek, bad for the deep dive — gate output + traversal eat vertical space, push other slices off-screen.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>No overlay — no context shift</li>
+              <li>Click-collapse is immediate</li>
+              <li>Multiple expanded simultaneously (compare)</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Layout shifts disorient (other cards move)</li>
+              <li>Hard to fit timeline + gate output without scrolling</li>
+              <li>Action bar competes with sprint state strip above</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a detail view.</strong> Reply <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      Side decisions on A:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Drawer width</strong> — 60% as shown, or 50% (more cockpit visible) / 70% (more drawer canvas)?</li>
+        <li><strong>"Open in terminal" semantics</strong> — opens a new Terminal.app window running <code>claude --resume &lt;session-id&gt;</code> at the worktree path. Confirm that's the right shape; same flow that <code>status</code> command uses in the prototype.</li>
+        <li><strong>Intervention actions</strong> — HOLD (pause this slice), MARK FAILED, SKIP. Want a fourth? Common candidates: "force re-run from setup", "promote to HITL", "merge from here".</li>
+        <li><strong>Keyboard nav</strong> — <code>j/k</code> to step through slices while drawer is open, <code>esc</code> to close, <code>cmd-shift-c</code> to copy session id. Worth it, or keep keyboard minimal?</li>
+        <li><strong>Side-by-side compare</strong> — two slices open at once is rare but powerful (compare last successful vs current failing). Defer to v2, or design for it now?</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

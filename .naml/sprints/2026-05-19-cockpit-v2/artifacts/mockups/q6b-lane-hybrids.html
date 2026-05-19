@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q6b — Lane hybrids · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .canvas {
+      padding: 18px;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+
+    /* ───────── shared gantt look ───────── */
+    .gantt {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .gtime {
+      display: flex; justify-content: space-between;
+      padding: 0 0 8px 220px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--border-soft);
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+    .gtime .now { color: var(--c-accent); font-weight: 600; }
+    .glane {
+      display: grid;
+      grid-template-columns: 210px 1fr;
+      gap: 10px;
+      align-items: stretch;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .glane:last-child { border-bottom: none; }
+
+    /* enhanced gutter for hybrid 1 */
+    .gut {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex; flex-direction: column; gap: 6px;
+      font-family: var(--mono); font-size: 10.5px;
+    }
+    .gut.busy { border-left: 3px solid var(--c-work); }
+    .gut.review-active { border-left: 3px solid var(--c-review); }
+    .gut.idle { border-left: 3px solid var(--c-blocked); }
+    .gut .head {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .gut .lname { color: var(--text-0); font-weight: 600; font-size: 11.5px; }
+    .gut .pill {
+      font-size: 8.5px; padding: 1px 6px; border-radius: 999px;
+      letter-spacing: 0.1em;
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .pill.busy { background: rgba(56,189,248,0.15); color: var(--c-accent); }
+    .pill.busy .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--c-accent); box-shadow: 0 0 5px var(--c-accent); animation: pulse 2s ease-in-out infinite; }
+    .pill.review { background: rgba(251,191,36,0.15); color: var(--c-review); }
+    .pill.review .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--c-review); box-shadow: 0 0 5px var(--c-review); }
+    .pill.idle { background: var(--bg-3); color: var(--text-3); }
+    .pill.idle .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); }
+    .gut .cur {
+      font-size: 10.5px; color: var(--text-1);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .gut .cur .sid { color: var(--c-accent); margin-right: 4px; }
+    .gut .meters {
+      display: flex; gap: 6px; align-items: center;
+      font-size: 9.5px; color: var(--text-3);
+    }
+    .gut .meters .m {
+      display: inline-flex; align-items: center; gap: 4px;
+    }
+    .gut .meters .v { color: var(--text-0); font-weight: 600; }
+    .gut .meters .v.warn { color: var(--c-warn); }
+    .gut .meters .bar {
+      width: 30px; height: 3px; background: var(--bg-3); border-radius: 2px; overflow: hidden;
+      position: relative;
+    }
+    .gut .meters .bar .f { position: absolute; inset: 0; }
+    .gut .meters .bar .f.work { background: var(--c-work); }
+    .gut .meters .bar .f.warn { background: var(--c-warn); }
+    .gut .foot {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 9px; color: var(--text-3);
+      letter-spacing: 0.08em;
+    }
+    .gut .foot a { color: var(--c-accent); }
+
+    /* track */
+    .gtrack {
+      position: relative;
+      height: 56px;
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border-radius: 8px;
+      border: 1px solid var(--border-soft);
+      overflow: hidden;
+    }
+    .gtrack.idle {
+      background: repeating-linear-gradient(
+        45deg,
+        var(--bg-2),
+        var(--bg-2) 8px,
+        var(--bg-1) 8px,
+        var(--bg-1) 16px
+      );
+    }
+
+    .gblock {
+      position: absolute;
+      top: 6px; bottom: 6px;
+      padding: 4px 8px;
+      display: flex; flex-direction: column; justify-content: center; gap: 2px;
+      font-family: var(--mono); font-size: 10px;
+      color: #fff;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .gblock .gid { font-size: 10.5px; font-weight: 700; }
+    .gblock .gtt { font-size: 9px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gblock.work {
+      background: linear-gradient(180deg, rgba(56,189,248,0.7), rgba(56,189,248,0.5));
+      border: 1px solid var(--c-work);
+      box-shadow: 0 0 10px rgba(56,189,248,0.3);
+    }
+    .gblock.review {
+      background: linear-gradient(180deg, rgba(251,191,36,0.65), rgba(251,191,36,0.45));
+      border: 1px solid var(--c-review);
+    }
+    .gblock.merged {
+      background: linear-gradient(180deg, rgba(52,211,153,0.55), rgba(52,211,153,0.3));
+      border: 1px solid rgba(52,211,153,0.6);
+    }
+
+    /* ghost slot for upcoming slices */
+    .gghost {
+      position: absolute;
+      top: 6px; bottom: 6px;
+      border: 1px dashed var(--border);
+      border-radius: 5px;
+      padding: 4px 8px;
+      display: flex; align-items: center; gap: 4px;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      background: rgba(56,189,248,0.03);
+    }
+    .gghost .gid { color: var(--text-2); }
+
+    /* idle "ready" band */
+    .gready {
+      position: absolute;
+      top: 6px; bottom: 6px;
+      border: 1px dashed rgba(56,189,248,0.4);
+      border-radius: 5px;
+      padding: 4px 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--c-accent);
+      letter-spacing: 0.1em;
+      background: rgba(56,189,248,0.05);
+    }
+
+    /* now line */
+    .gnow-line {
+      position: absolute;
+      top: -2px; bottom: -2px;
+      width: 2px;
+      background: var(--c-accent);
+      box-shadow: 0 0 8px var(--c-accent);
+      z-index: 5;
+    }
+    .gnow-line::before {
+      content: 'NOW';
+      position: absolute;
+      top: -14px; left: 50%; transform: translateX(-50%);
+      font-family: var(--mono); font-size: 8px;
+      color: var(--c-accent); letter-spacing: 0.16em;
+      background: var(--bg-0);
+      padding: 0 4px;
+    }
+
+    /* queue strip */
+    .queue-strip {
+      background: var(--bg-1);
+      border: 1px dashed var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+    }
+    .queue-strip .qlabel { color: var(--text-3); letter-spacing: 0.12em; }
+    .queue-strip .qchip {
+      display: inline-flex; gap: 4px; align-items: center;
+      padding: 3px 8px; background: var(--bg-2);
+      border: 1px solid var(--border-soft); border-radius: 5px;
+      color: var(--text-1);
+    }
+    .queue-strip .qchip .id { color: var(--c-accent); }
+    .queue-strip .qchip.ready { border-color: rgba(52,211,153,0.3); }
+    .queue-strip .qchip.ready .id { color: var(--c-accent-2); }
+
+    /* ───────── Hybrid 2: split view (gantt + kanban) ───────── */
+    .split-tag {
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      letter-spacing: 0.14em;
+      margin: 4px 4px 0;
+      padding-bottom: 4px;
+      border-bottom: 1px dashed var(--border-soft);
+    }
+    .split-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .lcard {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .lcard::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    }
+    .lcard.work::before { background: var(--c-work); }
+    .lcard.review::before { background: var(--c-review); }
+    .lcard.idle::before { background: var(--c-blocked); }
+    .lcard .lh {
+      display: flex; align-items: center; gap: 8px;
+    }
+    .lcard .lh .lname {
+      font-family: var(--mono); font-size: 11.5px; color: var(--text-0); font-weight: 600;
+    }
+    .lcard .body {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .lcard .ttl {
+      font-size: 11px; color: var(--text-0);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .lcard .lmeters {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .lcard .mt {
+      font-family: var(--mono); font-size: 8.5px; color: var(--text-3); letter-spacing: 0.08em;
+    }
+    .lcard .mv {
+      font-family: var(--mono); font-size: 10px; color: var(--text-0); font-weight: 600;
+    }
+    .lcard .mv.warn { color: var(--c-warn); }
+    .lcard .bar {
+      height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden;
+      position: relative; margin-top: 2px;
+    }
+    .lcard .bar .f { position: absolute; inset: 0; }
+    .lcard .bar .f.work { background: var(--c-work); }
+    .lcard .bar .f.warn { background: var(--c-warn); }
+    .lcard .idle-msg {
+      padding: 16px;
+      border: 1px dashed var(--border);
+      border-radius: 5px;
+      text-align: center;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 06b / Lane layout — hybrids</div>
+      <h1>Gantt-flavored, with lane utilization made loud.</h1>
+      <div class="qsub">
+        You liked B (horizontal time-axis swimlanes) but wanted A's wins baked in: lane state always visible, idle lanes calling for work, queue strip showing competition. Two hybrid shapes below.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q6-lanes.html">← Q6 (originals)</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Hybrid 1 — gantt with a fat lane gutter + idle "READY" band + ghost slots.</strong>
+      Each lane row has a 210px left gutter showing lane status pill, current slice id + title, live duration + context % meters, and "this sprint" stats. The track itself uses dashed/empty regions to show "I'm ready, waiting for work" — that signal becomes the visual headline whenever a lane is starved. Future slices are sketched as ghost blocks beyond the now-line, so you can preview what's about to land on which lane.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── Hybrid 1: gantt + fat gutter (RECOMMENDED) ─────────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">HYBRID 1 · "B with A's lane signal"</div>
+        <h2>Gantt + fat lane gutter + idle READY band + ghost slots</h2>
+      </div>
+      <div class="option-preview">
+        <div class="canvas">
+          <div class="gantt">
+            <div class="gtime">
+              <span>14:02</span><span>14:08</span><span>14:14</span><span>14:20</span><span class="now">14:26 · now</span><span style="color: var(--text-3)">14:32 (eta)</span>
+            </div>
+
+            <!-- LANE 1 (review-active) -->
+            <div class="glane">
+              <div class="gut review-active">
+                <div class="head">
+                  <span class="lname">lane-1</span>
+                  <span class="pill review"><span class="dt"></span>REVIEW</span>
+                </div>
+                <div class="cur"><span class="sid">slice-3</span>config schema validator</div>
+                <div class="meters">
+                  <span class="m">dur <span class="v">1m48s</span></span>
+                  <span class="m">ctx <span class="v">41%</span></span>
+                  <span class="m"><span class="bar"><span class="f work" style="width: 41%"></span></span></span>
+                </div>
+                <div class="foot">
+                  <span>this sprint · 2 done</span>
+                  <a>RESUME ↗</a>
+                </div>
+              </div>
+              <div class="gtrack">
+                <div class="gblock merged" style="left: 0%; width: 28%;">
+                  <span class="gid">slice-1</span>
+                  <span class="gtt">setup + skeleton</span>
+                </div>
+                <div class="gblock review" style="left: 30%; width: 28%;">
+                  <span class="gid">slice-3 · review</span>
+                  <span class="gtt">config schema validator</span>
+                </div>
+                <div class="gghost" style="left: 60%; width: 22%;">
+                  <span class="gid">slice-6</span>
+                  <span>ghost</span>
+                </div>
+                <div class="gnow-line" style="left: 68%;"></div>
+              </div>
+            </div>
+
+            <!-- LANE 2 (work-active) -->
+            <div class="glane">
+              <div class="gut busy">
+                <div class="head">
+                  <span class="lname">lane-2</span>
+                  <span class="pill busy"><span class="dt"></span>WORK</span>
+                </div>
+                <div class="cur"><span class="sid">slice-4</span>HTML renderer w/ snapshot</div>
+                <div class="meters">
+                  <span class="m">dur <span class="v">6m12s</span></span>
+                  <span class="m">ctx <span class="v warn">73%</span></span>
+                  <span class="m"><span class="bar"><span class="f warn" style="width: 73%"></span></span></span>
+                </div>
+                <div class="foot">
+                  <span>this sprint · 1 done · retry 1/2</span>
+                  <a>RESUME ↗</a>
+                </div>
+              </div>
+              <div class="gtrack">
+                <div class="gblock merged" style="left: 0%; width: 24%;">
+                  <span class="gid">slice-0</span>
+                  <span class="gtt">scaffold runner</span>
+                </div>
+                <div class="gblock work" style="left: 26%; width: 42%;">
+                  <span class="gid">slice-4 · work</span>
+                  <span class="gtt">HTML renderer</span>
+                </div>
+                <div class="gghost" style="left: 70%; width: 22%;">
+                  <span class="gid">slice-7</span>
+                  <span>ghost</span>
+                </div>
+                <div class="gnow-line" style="left: 68%;"></div>
+              </div>
+            </div>
+
+            <!-- LANE 3 (idle, ready) -->
+            <div class="glane">
+              <div class="gut idle">
+                <div class="head">
+                  <span class="lname">lane-3</span>
+                  <span class="pill idle"><span class="dt"></span>IDLE</span>
+                </div>
+                <div class="cur" style="color: var(--text-3)">no slice assigned</div>
+                <div class="meters">
+                  <span class="m">idle for <span class="v">2m 14s</span></span>
+                </div>
+                <div class="foot">
+                  <span>this sprint · 2 done</span>
+                  <span style="color: var(--c-accent)">⌁ waiting</span>
+                </div>
+              </div>
+              <div class="gtrack idle">
+                <div class="gblock merged" style="left: 0%; width: 50%;">
+                  <span class="gid">slice-2</span>
+                  <span class="gtt">config schema + tests</span>
+                </div>
+                <div class="gready" style="left: 52%; width: 16%;">
+                  ⌁ READY · WAITING FOR WORK
+                </div>
+                <div class="gghost" style="left: 70%; width: 14%; opacity: 0.5;">
+                  <span class="gid">slice-5</span>
+                  <span>likely next</span>
+                </div>
+                <div class="gnow-line" style="left: 68%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- queue strip -->
+          <div class="queue-strip">
+            <span class="qlabel">QUEUE</span>
+            <span class="qchip"><span class="id">slice-5</span>blocked on slice-4</span>
+            <span class="qchip ready"><span class="id">slice-6</span>ready · → lane-1 next</span>
+            <span class="qchip ready"><span class="id">slice-7</span>ready · → lane-2 next</span>
+            <span class="qchip"><span class="id">slice-8</span>blocked on slice-6</span>
+            <span style="flex: 1"></span>
+            <span style="color: var(--text-3)">3 lanes · 2 ready · 2 blocked · 1 idle</span>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">The gantt is the dominant view (B's strength), but the fat gutter on the left makes <em>lane state</em> impossible to miss — pill + current slice + live ctx% + duration are always visible (A's win). When a lane is idle, the track explicitly fills with a glowing dashed <code>⌁ READY · WAITING FOR WORK</code> band, so empty capacity is louder than empty space. Ghost blocks past the "now" line preview the scheduler's plan.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Time + duration readable (B)</li>
+              <li>Lane status always visible (A)</li>
+              <li>Idle = glowing READY band, not absence</li>
+              <li>Ghost blocks preview scheduler plan</li>
+              <li>Queue strip kept visible</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Each row is ~92px tall — only fits 3-4 lanes per screen</li>
+              <li>Two information surfaces per row (gutter + track)</li>
+              <li>Ghost-block accuracy depends on scheduler predictability</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Hybrid 2: split view ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">HYBRID 2 · "both lenses stacked"</div>
+        <h2>Gantt on top · lane-state kanban cards below · queue at bottom</h2>
+      </div>
+      <div class="option-preview">
+        <div class="canvas">
+          <!-- compact gantt on top (no fat gutter — small lane labels) -->
+          <div class="split-tag">TIME · gantt by lane</div>
+          <div class="gantt" style="padding: 10px 14px;">
+            <div class="gtime" style="padding-left: 64px;">
+              <span>14:02</span><span>14:08</span><span>14:14</span><span>14:20</span><span class="now">now</span><span style="color: var(--text-3)">eta</span>
+            </div>
+            <div class="glane" style="grid-template-columns: 56px 1fr; padding: 6px 0;">
+              <div style="font-family: var(--mono); font-size: 10.5px; color: var(--text-1); align-self: center;">lane-1</div>
+              <div class="gtrack" style="height: 28px;">
+                <div class="gblock merged" style="left: 0%; width: 28%; top: 3px; bottom: 3px;"><span class="gid">slice-1</span></div>
+                <div class="gblock review" style="left: 30%; width: 28%; top: 3px; bottom: 3px;"><span class="gid">slice-3</span></div>
+                <div class="gghost" style="left: 60%; width: 22%; top: 3px; bottom: 3px;"><span class="gid">slice-6</span></div>
+                <div class="gnow-line" style="left: 68%;"></div>
+              </div>
+            </div>
+            <div class="glane" style="grid-template-columns: 56px 1fr; padding: 6px 0;">
+              <div style="font-family: var(--mono); font-size: 10.5px; color: var(--text-1); align-self: center;">lane-2</div>
+              <div class="gtrack" style="height: 28px;">
+                <div class="gblock merged" style="left: 2%; width: 24%; top: 3px; bottom: 3px;"><span class="gid">slice-0</span></div>
+                <div class="gblock work" style="left: 26%; width: 42%; top: 3px; bottom: 3px;"><span class="gid">slice-4 ▶</span></div>
+                <div class="gghost" style="left: 70%; width: 22%; top: 3px; bottom: 3px;"><span class="gid">slice-7</span></div>
+                <div class="gnow-line" style="left: 68%;"></div>
+              </div>
+            </div>
+            <div class="glane" style="grid-template-columns: 56px 1fr; padding: 6px 0;">
+              <div style="font-family: var(--mono); font-size: 10.5px; color: var(--text-1); align-self: center;">lane-3</div>
+              <div class="gtrack idle" style="height: 28px;">
+                <div class="gblock merged" style="left: 0%; width: 50%; top: 3px; bottom: 3px;"><span class="gid">slice-2</span></div>
+                <div class="gready" style="left: 52%; width: 16%; top: 3px; bottom: 3px; font-size: 8.5px;">⌁ READY</div>
+                <div class="gnow-line" style="left: 68%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- kanban cards underneath -->
+          <div class="split-tag" style="margin-top: 4px;">NOW · current state per lane</div>
+          <div class="split-row">
+            <div class="lcard review">
+              <div class="lh">
+                <span class="lname">lane-1</span>
+                <span class="pill review"><span class="dt"></span>REVIEW</span>
+              </div>
+              <div class="body">
+                <div class="ttl"><span style="color: var(--c-accent)">slice-3</span> · Render config schema validator</div>
+                <div class="lmeters">
+                  <div><div class="mt">DUR</div><div class="mv">1m48s</div><div class="bar"><div class="f warn" style="width: 30%;"></div></div></div>
+                  <div><div class="mt">CTX</div><div class="mv">41%</div><div class="bar"><div class="f work" style="width: 41%;"></div></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="lcard work">
+              <div class="lh">
+                <span class="lname">lane-2</span>
+                <span class="pill busy"><span class="dt"></span>WORK</span>
+              </div>
+              <div class="body">
+                <div class="ttl"><span style="color: var(--c-accent)">slice-4</span> · HTML renderer + mock-target snapshot</div>
+                <div class="lmeters">
+                  <div><div class="mt">DUR</div><div class="mv">6m12s</div><div class="bar"><div class="f work" style="width: 68%;"></div></div></div>
+                  <div><div class="mt">CTX</div><div class="mv warn">73%</div><div class="bar"><div class="f warn" style="width: 73%;"></div></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="lcard idle">
+              <div class="lh">
+                <span class="lname">lane-3</span>
+                <span class="pill idle"><span class="dt"></span>IDLE · 2m14s</span>
+              </div>
+              <div class="body">
+                <div class="idle-msg">⌁ READY · NEXT SLICE WILL LAND HERE</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="queue-strip">
+            <span class="qlabel">QUEUE</span>
+            <span class="qchip"><span class="id">slice-5</span>blocked on slice-4</span>
+            <span class="qchip ready"><span class="id">slice-6</span>ready</span>
+            <span class="qchip ready"><span class="id">slice-7</span>ready</span>
+            <span class="qchip"><span class="id">slice-8</span>blocked on slice-6</span>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Two surfaces stacked: a compact gantt on top for the time view, and a kanban row below showing only the <em>current</em> state of each lane as a fat card with full telemetry. Queue strip at the very bottom. You get both lenses — historical time vs. live state — but at the cost of vertical real estate.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Both lenses in one screen</li>
+              <li>Gantt stays compact (skinny tracks)</li>
+              <li>"Now" telemetry has full card-grade detail</li>
+              <li>Clear separation of "history" vs "live"</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>~520px tall — pushes slice cards off-screen</li>
+              <li>Redundant data (lane-1 mentioned twice)</li>
+              <li>More visual complexity per screen</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a hybrid.</strong> Reply <code>1</code> (gantt + fat gutter) or <code>2</code> (split gantt + kanban). Or "1 but…" if you want a tweak.
+    <div class="ask">
+      A couple of micro-decisions either way:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Ghost blocks past "now"</strong> — show the scheduler's plan ahead of time, or only render what's already started? My pick: show ghosts, dimmer when speculation gets less certain (depends_on chain depth).</li>
+        <li><strong>Time axis scaling</strong> — fixed window (always last 30m + 6m of future), or auto-fit to sprint duration? Auto-fit reads better for short sprints; fixed window matches a cockpit "live tape".</li>
+        <li><strong>Idle "READY" band</strong> — glow always, or only pulse when there are ready slices queued (i.e., "you actually have work I could do")? Pulse-when-queued tells you something actionable.</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

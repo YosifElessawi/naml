@@ -1,0 +1,763 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q9 — Settings · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 16px; min-height: 0; background: var(--bg-0); }
+
+    /* ───────── shared settings styling ───────── */
+    .panel {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .section-h {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.14em;
+      padding: 12px 16px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .field {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 14px;
+      padding: 14px 18px;
+      align-items: center;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .field:last-child { border-bottom: none; }
+    .field .fl {
+      font-size: 12px; color: var(--text-0); font-weight: 500;
+    }
+    .field .fl .desc {
+      font-size: 11px; color: var(--text-2); font-weight: 400; margin-top: 3px;
+      line-height: 1.45;
+    }
+    .field .fc { display: flex; align-items: center; gap: 8px; }
+    .input, .select {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--text-0);
+      min-width: 200px;
+    }
+    .input:focus, .select:focus { border-color: var(--c-accent); outline: none; }
+    .input.mono { font-family: var(--mono); }
+    .input.wide { min-width: 320px; }
+    .input.short { min-width: 80px; }
+    .toggle {
+      position: relative;
+      width: 36px; height: 20px;
+      background: var(--bg-3);
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 1px; left: 1px;
+      width: 16px; height: 16px;
+      background: var(--text-2);
+      border-radius: 50%;
+      transition: all 0.2s ease;
+    }
+    .toggle.on { background: rgba(56,189,248,0.2); border-color: var(--c-accent); }
+    .toggle.on::after { left: 17px; background: var(--c-accent); box-shadow: 0 0 6px var(--c-accent); }
+    .slider {
+      width: 220px;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      background: var(--bg-3);
+      border-radius: 3px;
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      background: var(--c-accent);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--c-accent);
+    }
+    .badgep {
+      font-family: var(--mono); font-size: 9.5px;
+      padding: 2px 7px; border-radius: 4px;
+      letter-spacing: 0.1em;
+    }
+    .badgep.ok { background: rgba(52,211,153,0.15); color: var(--c-accent-2); }
+    .badgep.warn { background: rgba(251,191,36,0.15); color: var(--c-warn); }
+
+    .gate-row {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 0;
+      border-bottom: 1px dashed var(--border-soft);
+    }
+    .gate-row:last-child { border-bottom: none; }
+    .gate-row .lbl {
+      width: 100px;
+      font-family: var(--mono); font-size: 11px; color: var(--text-1);
+    }
+    .gate-row .input { flex: 1; }
+    .gate-row .stt {
+      font-family: var(--mono); font-size: 10px;
+    }
+
+    /* ─────────── A: tabbed layout ─────────── */
+    .stabs {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 14px;
+      min-height: 460px;
+    }
+    .lnav {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 8px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .lnav .nv {
+      padding: 9px 12px;
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--text-2);
+      cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .lnav .nv:hover { background: var(--bg-2); color: var(--text-1); }
+    .lnav .nv.active {
+      background: rgba(56,189,248,0.1); color: var(--c-accent);
+      border-left: 2px solid var(--c-accent);
+      padding-left: 10px;
+    }
+    .lnav .nv .ico {
+      width: 14px; opacity: 0.6;
+    }
+    .lnav .sep {
+      height: 1px; background: var(--border-soft); margin: 6px 8px;
+    }
+    .lnav .nv .badge {
+      margin-left: auto;
+      font-size: 9px;
+      padding: 1px 5px; border-radius: 3px;
+      background: var(--bg-3);
+      color: var(--text-3);
+    }
+    .rpanel { display: flex; flex-direction: column; gap: 12px; }
+
+    /* tag list (labels) */
+    .taglist {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .tag {
+      padding: 4px 10px;
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 999px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-1);
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .tag .x { color: var(--text-3); cursor: pointer; font-size: 11px; }
+
+    /* health page preview content */
+    .health-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .hcard {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .hcard .hl {
+      font-family: var(--mono); font-size: 9px; color: var(--text-3); letter-spacing: 0.12em;
+    }
+    .hcard .hv {
+      font-family: var(--mono); font-size: 18px; color: var(--text-0); font-weight: 700;
+    }
+    .hcard .hv.ok { color: var(--c-accent-2); }
+    .hcard .hv.warn { color: var(--c-warn); }
+    .hcard .hd { font-family: var(--mono); font-size: 10px; color: var(--text-2); }
+    .hcard svg { width: 100%; height: 38px; display: block; }
+
+    /* ─────────── B: long scroll ─────────── */
+    .anchor-rail {
+      position: sticky; top: 0;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--border-soft);
+      padding: 8px 12px;
+      display: flex; gap: 4px;
+      overflow-x: auto;
+    }
+    .anchor-rail a {
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+      padding: 6px 10px;
+      border-radius: 5px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .anchor-rail a:hover { background: var(--bg-2); color: var(--text-0); }
+    .anchor-rail a.active { background: rgba(56,189,248,0.12); color: var(--c-accent); }
+
+    /* ─────────── C: wizard ─────────── */
+    .wizard {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 14px;
+      min-height: 380px;
+    }
+    .stepl {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .stp {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 11px;
+    }
+    .stp .num {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: 50%; font-size: 10px; color: var(--text-3);
+    }
+    .stp.done .num { background: var(--c-accent-2); color: #04201a; border-color: var(--c-accent-2); }
+    .stp.curr .num { background: var(--c-accent); color: #052735; border-color: var(--c-accent); box-shadow: 0 0 8px var(--c-accent); }
+    .stp.curr { color: var(--c-accent); }
+    .stp.done { color: var(--text-1); }
+    .stp.todo { color: var(--text-3); }
+    .wbtns {
+      display: flex; gap: 8px; justify-content: flex-end;
+      padding: 14px 18px;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border-soft);
+    }
+    .btn {
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 11px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .btn.primary { background: var(--c-accent); color: #052735; font-weight: 700; }
+    .btn.ghost { background: var(--bg-3); color: var(--text-1); border-color: var(--border); }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 09 / Settings</div>
+      <h1>How is the Settings page organized?</h1>
+      <div class="qsub">
+        Settings has to carry: project config (gates, base branch, slug), lane count, account / <code>CLAUDE_CONFIG_DIR</code>, sync cadence, label vocabulary, ADR folder — <em>plus</em> the Health page (trend graphs and long-horizon analytics). Trade-off: tabbed nav, long scroll, or first-run wizard.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q8b-metrics-sync.html">← Q8b</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — left-nav tabbed page with Health as a top section.</strong>
+      Six sections: <em>Project · Lanes · Gates · Account · Sync · Health · Advanced</em>. Health gets the most generous canvas because it's where trend graphs from Q7b live. The tabbed structure lets the daily settings (gates, lane count) stay terse while Health is allowed to sprawl. No wizard — first-run uses the existing <code>/setup-naml</code> skill in the terminal, not a UI flow.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── A: TABBED (RECOMMENDED) ─────────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A</div>
+        <h2>Tabbed · left nav · Project tab shown, Health tab teased</h2>
+      </div>
+      <div class="option-preview">
+        <div class="stabs">
+
+          <!-- LEFT NAV -->
+          <div class="lnav">
+            <div class="nv active">
+              <span class="ico">●</span><span>Project</span>
+            </div>
+            <div class="nv">
+              <span class="ico">▤</span><span>Lanes</span>
+            </div>
+            <div class="nv">
+              <span class="ico">▣</span><span>Gates</span>
+            </div>
+            <div class="nv">
+              <span class="ico">◐</span><span>Account</span>
+              <span class="badge">multi</span>
+            </div>
+            <div class="nv">
+              <span class="ico">⌁</span><span>Sync</span>
+            </div>
+            <div class="sep"></div>
+            <div class="nv">
+              <span class="ico">▴</span><span>Health</span>
+              <span class="badge" style="background: rgba(52,211,153,0.15); color: var(--c-accent-2)">trends</span>
+            </div>
+            <div class="sep"></div>
+            <div class="nv">
+              <span class="ico">⚙</span><span>Advanced</span>
+            </div>
+            <div class="nv" style="margin-top: auto; color: var(--text-3);">
+              <span class="ico">+</span><span>Add project…</span>
+            </div>
+          </div>
+
+          <!-- RIGHT PANE: Project tab -->
+          <div class="rpanel">
+
+            <div class="panel">
+              <div class="section-h">PROJECT · inpolicy/web</div>
+              <div class="field">
+                <div class="fl">Repo slug
+                  <div class="desc">owner/name on GitHub. Used for <code>gh pr create</code> + issue publishing.</div>
+                </div>
+                <div class="fc">
+                  <input class="input wide mono" value="inpolicy/web">
+                  <span class="badgep ok">verified</span>
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Base branch
+                  <div class="desc">Default target for PRs. Detected from git remote.</div>
+                </div>
+                <div class="fc">
+                  <input class="input mono short" value="main">
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Project root
+                  <div class="desc">Where naml runs. Reads <code>.naml/config.toml</code>.</div>
+                </div>
+                <div class="fc">
+                  <input class="input wide mono" value="/Users/yosifelessawi/Desktop/inpolicy/web">
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">ADR folder
+                  <div class="desc">Where new ADRs land + where grilling reads them from.</div>
+                </div>
+                <div class="fc">
+                  <input class="input mono" value="docs/adrs/">
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Lifetime tracking since
+                  <div class="desc">First slice JSONL event. Set automatically.</div>
+                </div>
+                <div class="fc">
+                  <span style="font-family: var(--mono); color: var(--text-1);">2026-03-14</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-h">LABELS · GitHub vocabulary</div>
+              <div class="field">
+                <div class="fl">Sprint label prefix
+                  <div class="desc">Applied to every issue in a sprint.</div>
+                </div>
+                <div class="fc">
+                  <input class="input mono" value="sprint:">
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Slice label prefix
+                  <div class="desc">Applied to each slice's issue.</div>
+                </div>
+                <div class="fc">
+                  <input class="input mono" value="slice:">
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Lifecycle labels
+                  <div class="desc">naml-managed labels per state.</div>
+                </div>
+                <div class="fc">
+                  <div class="taglist">
+                    <span class="tag">naml:running <span class="x">×</span></span>
+                    <span class="tag">naml:review <span class="x">×</span></span>
+                    <span class="tag">naml:human-review <span class="x">×</span></span>
+                    <span class="tag">naml:done <span class="x">×</span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sneak peek of GATES tab and HEALTH tab below -->
+            <div class="panel">
+              <div class="section-h">GATES · validation commands (preview · full tab)</div>
+              <div style="padding: 12px 18px;">
+                <div class="gate-row">
+                  <span class="lbl">install</span>
+                  <input class="input mono" value="pnpm install --frozen-lockfile">
+                  <span class="stt" style="color: var(--c-accent-2)">✓ last ran 14:21</span>
+                </div>
+                <div class="gate-row">
+                  <span class="lbl">lint</span>
+                  <input class="input mono" value="pnpm lint">
+                  <span class="stt" style="color: var(--c-accent-2)">✓</span>
+                </div>
+                <div class="gate-row">
+                  <span class="lbl">typecheck</span>
+                  <input class="input mono" value="pnpm typecheck">
+                  <span class="stt" style="color: var(--c-warn)">▶ running on slice-4</span>
+                </div>
+                <div class="gate-row">
+                  <span class="lbl">test</span>
+                  <input class="input mono" value="pnpm test --run">
+                  <span class="stt" style="color: var(--text-3)">—</span>
+                </div>
+                <div class="gate-row">
+                  <span class="lbl">build</span>
+                  <input class="input mono" value="pnpm build">
+                  <span class="stt" style="color: var(--text-3)">—</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-h">LANES &amp; SYNC · preview · full tab</div>
+              <div class="field">
+                <div class="fl">Default parallel lanes
+                  <div class="desc">Capped by DAG width + headroom at runtime.</div>
+                </div>
+                <div class="fc">
+                  <input class="slider" type="range" value="3" min="1" max="8">
+                  <span class="mono" style="color: var(--c-accent); font-size: 13px; font-weight: 700;">3</span>
+                  <span style="color: var(--text-3); font-size: 11px;">range 1–8</span>
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">SSE heartbeat
+                  <div class="desc">Drives the "Synced Ns ago" badge.</div>
+                </div>
+                <div class="fc">
+                  <input class="input mono short" value="2"> <span style="color: var(--text-3); font-family: var(--mono); font-size: 11px;">seconds</span>
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Reduce-motion
+                  <div class="desc">Disables card-flip + counter-tween animations.</div>
+                </div>
+                <div class="fc">
+                  <div class="toggle"></div>
+                  <span style="color: var(--text-3); font-size: 11px;">off (smooth)</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-h">ACCOUNT · CLAUDE_CONFIG_DIR · preview · full tab</div>
+              <div class="field">
+                <div class="fl">Active config dir
+                  <div class="desc">Switches which Claude account naml uses.</div>
+                </div>
+                <div class="fc">
+                  <select class="select mono wide">
+                    <option>~/.claude-personal · personal</option>
+                    <option>~/.claude-work · work</option>
+                    <option>+ add new config…</option>
+                  </select>
+                  <span class="badgep ok">connected</span>
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Model
+                  <div class="desc">Used by lanes when spawning <code>claude -p</code>.</div>
+                </div>
+                <div class="fc">
+                  <select class="select mono">
+                    <option>claude-opus-4-7</option>
+                    <option>claude-sonnet-4-6</option>
+                    <option>claude-haiku-4-5</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <div class="fl">Context window
+                  <div class="desc">Used to compute slice ctx %. Pulled from model.</div>
+                </div>
+                <div class="fc">
+                  <span class="mono" style="color: var(--text-1);">200,000 tokens</span>
+                  <span class="badgep">auto</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="section-h" style="background: linear-gradient(180deg, rgba(52,211,153,0.08), var(--bg-2));">▴ HEALTH · trends · preview · full tab</div>
+              <div style="padding: 14px 18px;">
+                <div class="health-grid">
+                  <div class="hcard">
+                    <span class="hl">DAILY COST · 30D</span>
+                    <span class="hv">$118.42</span>
+                    <span class="hd">avg $3.94/day · peak $11.20</span>
+                    <svg viewBox="0 0 220 40" preserveAspectRatio="none">
+                      <polyline points="0,30 18,28 36,32 54,20 72,24 90,12 108,28 126,16 144,22 162,8 180,18 198,6 220,14"
+                        stroke="#38bdf8" stroke-width="1.8" fill="none"/>
+                    </svg>
+                  </div>
+                  <div class="hcard">
+                    <span class="hl">TIER-1 HIT · 30D</span>
+                    <span class="hv ok">78%</span>
+                    <span class="hd">7d: 78% · 30d: 74% · ↗ +4pp</span>
+                    <svg viewBox="0 0 220 40" preserveAspectRatio="none">
+                      <polyline points="0,24 22,22 44,26 66,18 88,20 110,16 132,14 154,12 176,10 198,8 220,6"
+                        stroke="#34d399" stroke-width="1.8" fill="none"/>
+                    </svg>
+                  </div>
+                  <div class="hcard">
+                    <span class="hl">AVG SPRINT · 30D</span>
+                    <span class="hv">37m</span>
+                    <span class="hd">p50 37m · p95 62m · ↘ faster</span>
+                    <svg viewBox="0 0 220 40" preserveAspectRatio="none">
+                      <polyline points="0,8 22,10 44,12 66,14 88,18 110,16 132,20 154,24 176,22 198,26 220,28"
+                        stroke="#a78bfa" stroke-width="1.8" fill="none"/>
+                    </svg>
+                  </div>
+                  <div class="hcard">
+                    <span class="hl">SLICE FAIL RATE · 7D</span>
+                    <span class="hv warn">5.6%</span>
+                    <span class="hd">↗ +1.2pp · check ctx exhaustion</span>
+                    <svg viewBox="0 0 220 40" preserveAspectRatio="none">
+                      <polyline points="0,32 22,30 44,28 66,32 88,28 110,30 132,26 154,28 176,22 198,18 220,14"
+                        stroke="#fbbf24" stroke-width="1.8" fill="none"/>
+                    </svg>
+                  </div>
+                  <div class="hcard">
+                    <span class="hl">REVIEW · LGTM 1ST PASS</span>
+                    <span class="hv ok">82%</span>
+                    <span class="hd">mean iters 1.2 · disagree 6%</span>
+                    <svg viewBox="0 0 220 40" preserveAspectRatio="none">
+                      <polyline points="0,18 22,16 44,18 66,14 88,12 110,14 132,10 154,12 176,8 198,10 220,6"
+                        stroke="#34d399" stroke-width="1.8" fill="none"/>
+                    </svg>
+                  </div>
+                  <div class="hcard">
+                    <span class="hl">PER-SKILL COST · 30D</span>
+                    <span class="hv">implement $76</span>
+                    <span class="hd">review $24 · merge $9 · grill $5</span>
+                    <svg viewBox="0 0 220 40" preserveAspectRatio="none">
+                      <rect x="0" y="10" width="40" height="28" fill="#38bdf8" fill-opacity="0.6"/>
+                      <rect x="45" y="20" width="40" height="18" fill="#a78bfa" fill-opacity="0.6"/>
+                      <rect x="90" y="28" width="40" height="10" fill="#34d399" fill-opacity="0.6"/>
+                      <rect x="135" y="32" width="40" height="6" fill="#fbbf24" fill-opacity="0.6"/>
+                    </svg>
+                  </div>
+                </div>
+                <div style="margin-top: 10px; font-family: var(--mono); font-size: 10px; color: var(--text-3); text-align: right;">
+                  + per-state retry breakdown · cost by sprint · reviewer/implementer disagreement · TTFP histogram →
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Six tabs cover the whole config surface without crowding any of them. <em>Project / Lanes / Gates / Account / Sync</em> stay terse (forms). <em>Health</em> gets the most generous canvas (trend graphs from Q7b). <em>Advanced</em> hides feature flags, compaction triggers, debug toggles. Settings stays a calm, low-frequency view — you visit it to change something, not to monitor.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Scales as features grow (add tabs)</li>
+              <li>Health is loud without crowding daily settings</li>
+              <li>One-click jump to any section</li>
+              <li>Multi-project surface (top of nav: "Add project…")</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Two-click depth to anything (settings tab → section tab)</li>
+              <li>Search would need to span tabs (defer)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── B: LONG SCROLL ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B</div>
+        <h2>Long single-page scroll · sticky anchor rail</h2>
+      </div>
+      <div class="option-preview">
+        <div class="anchor-rail">
+          <a class="active">PROJECT</a>
+          <a>LANES</a>
+          <a>GATES</a>
+          <a>ACCOUNT</a>
+          <a>SYNC</a>
+          <a>LABELS</a>
+          <a>ADR</a>
+          <a>HEALTH</a>
+          <a>ADVANCED</a>
+        </div>
+        <div style="padding: 14px 0; display: flex; flex-direction: column; gap: 12px;">
+          <div class="panel">
+            <div class="section-h">PROJECT</div>
+            <div class="field">
+              <div class="fl">Repo slug</div>
+              <div class="fc"><input class="input mono wide" value="inpolicy/web"></div>
+            </div>
+            <div class="field">
+              <div class="fl">Base branch</div>
+              <div class="fc"><input class="input mono short" value="main"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="section-h">LANES</div>
+            <div class="field">
+              <div class="fl">Parallel lanes</div>
+              <div class="fc"><input class="slider" type="range" value="3" min="1" max="8"><span class="mono" style="color: var(--c-accent); font-weight: 700;">3</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="section-h">GATES</div>
+            <div style="padding: 12px 18px;">
+              <div class="gate-row"><span class="lbl">lint</span><input class="input mono" value="pnpm lint"></div>
+              <div class="gate-row"><span class="lbl">typecheck</span><input class="input mono" value="pnpm typecheck"></div>
+              <div class="gate-row"><span class="lbl">test</span><input class="input mono" value="pnpm test --run"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="section-h">… continues scrolling for ACCOUNT, SYNC, LABELS, ADR, HEALTH, ADVANCED</div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Single scrollable page with a sticky anchor rail at the top. Everything visible by scrolling; <code>cmd-F</code> finds any setting. Simple to extend (just append a section).</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Browser <code>cmd-F</code> just works</li>
+              <li>One scroll = whole config</li>
+              <li>Easiest to extend</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Health graphs overshadow simple inputs by sheer height</li>
+              <li>Page gets long fast (8+ sections)</li>
+              <li>Mobile-style scrolling — feels less "cockpit"</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── C: WIZARD ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C</div>
+        <h2>Wizard-first · step-by-step on first run, tabbed after</h2>
+      </div>
+      <div class="option-preview">
+        <div class="wizard">
+          <div class="stepl">
+            <div class="stp done"><span class="num">✓</span>Repo &amp; base branch</div>
+            <div class="stp done"><span class="num">✓</span>Detect gates</div>
+            <div class="stp curr"><span class="num">3</span>Pick lane count</div>
+            <div class="stp todo"><span class="num">4</span>Account &amp; model</div>
+            <div class="stp todo"><span class="num">5</span>Labels &amp; ADR</div>
+            <div class="stp todo"><span class="num">6</span>Verify (dry-run)</div>
+          </div>
+          <div class="panel">
+            <div class="section-h">STEP 3 · PICK LANE COUNT</div>
+            <div class="field">
+              <div class="fl">How many parallel lanes?
+                <div class="desc">Each lane is a worktree + Claude session. More lanes = more parallelism + faster quota burn.</div>
+              </div>
+              <div class="fc">
+                <input class="slider" type="range" value="3" min="1" max="8">
+                <span class="mono" style="color: var(--c-accent); font-weight: 700; font-size: 14px;">3</span>
+                <span style="color: var(--text-3); font-size: 11px;">default · matches V2 design</span>
+              </div>
+            </div>
+            <div class="field">
+              <div class="fl">DAG width detection
+                <div class="desc">Runtime cap won't exceed how many slices can actually run in parallel.</div>
+              </div>
+              <div class="fc">
+                <div class="toggle on"></div>
+                <span style="color: var(--text-3); font-size: 11px;">on (recommended)</span>
+              </div>
+            </div>
+            <div class="wbtns">
+              <span class="btn ghost">← back</span>
+              <span class="btn primary">CONTINUE →</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">First-run wizard walks through every setting once. After completion, the same page acts as a normal settings page (tabbed). Useful for onboarding; redundant after that.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Great first experience</li>
+              <li>Hand-holds nontrivial config</li>
+              <li>Verifies each step before next</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Setup already exists as a CLI skill (<code>/setup-naml</code>)</li>
+              <li>Wizard duplicates that skill</li>
+              <li>Most users will only ever tweak one setting at a time</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a Settings layout.</strong> Reply <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      Side decisions on A:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Health as a top-level route or inside Settings?</strong> Inside Settings is cleaner (header stays Dashboard/Sprint/Settings as Q1 decided). But Health is half-analytics, not just config — would you rather promote it to a 4th header tab?</li>
+        <li><strong>Multi-project</strong> — left nav has "+ Add project…" at the bottom that runs <code>/setup-naml</code>. Project switcher stays in the header (Q2 decision). Confirm that's the model.</li>
+        <li><strong>Save behaviour</strong> — autosave on field blur, or explicit "Save" button per section? My pick: autosave with a discrete "Saved 2s ago" badge — fewer modal moments.</li>
+        <li><strong>Advanced tab contents</strong> — feature flags, JSONL compaction trigger, "reset aggregates" button, "wipe sprint history", expose <code>config.toml</code> raw editor. Anything you want bumped up out of Advanced into a primary tab?</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

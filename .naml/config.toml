@@ -1,0 +1,68 @@
+# naml config for the naml source repo itself.
+#
+# Naml is being prepared to dogfood the V2 flow on its own codebase once
+# Phase 5 (state machines) lands. This config lets the upcoming UI sprint
+# (.naml/sprints/2026-05-19-cockpit-v2/) execute against this repo.
+
+[repo]
+slug        = "YosifElessawi/naml"
+base_branch = "main"
+
+
+[paths]
+sprints_dir    = ".naml/sprints"
+feedback_inbox = "docs/feedback/inbox.md"
+
+
+# Single-lane to start — first self-host run should be conservative.
+# Bump to 3 once dogfood is healthy.
+[lanes]
+default = 1
+max     = 4
+
+
+[labels]
+ready      = "ready-for-agent"
+running    = "agent-running"
+done       = "agent-done"
+failed     = "agent-failed"
+needs_info = "needs-info"
+
+
+# Gate commands. naml itself is stdlib-only for runtime; tests use pytest.
+# Web slices (slice-1 onward) will add a TS/CSS tier — gates extend then.
+[[gates]]
+name = "test"
+argv = ["python", "-m", "pytest", "tests/", "-q"]
+
+# Uncomment once the web/ tier is added (slice-1 lands):
+# [[gates]]
+# name = "web-lint"
+# argv = ["pnpm", "--dir", "web", "lint"]
+#
+# [[gates]]
+# name = "web-typecheck"
+# argv = ["pnpm", "--dir", "web", "typecheck"]
+#
+# [[gates]]
+# name = "web-test"
+# argv = ["pnpm", "--dir", "web", "test", "--run"]
+
+
+[run]
+cap_minutes = 45
+max_retries = 2
+
+
+[pipeline]
+# Safe default for first self-host runs — open PRs, never auto-merge.
+# Flip to "review" once we trust the gates, then "merge" once we trust
+# the tiered merger end-to-end.
+stop_after  = "pr"
+auto_review = false
+
+
+[claude]
+bin        = "claude"
+# Use the higher-limit work account for self-host runs.
+config_dir = "~/.claude"

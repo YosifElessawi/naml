@@ -1,0 +1,1482 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>naml cockpit · final assembly</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    /* ────────────── COCKPIT FRAME ────────────── */
+    body { overflow-x: hidden; }
+    .cp {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      grid-template-rows: 56px 1fr;
+      grid-template-areas:
+        "header header"
+        "main rail";
+      height: 100vh;
+      width: 100vw;
+      background: var(--bg-0);
+    }
+
+    /* ─── header ─── */
+    .cp-hd {
+      grid-area: header;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 18px;
+      height: 56px;
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-1);
+      z-index: 50;
+      position: relative;
+    }
+    .cp-hd .logo {
+      font-family: var(--mono); color: var(--c-accent);
+      font-weight: 700; font-size: 14px;
+    }
+    .cp-hd .sync {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+    }
+    .cp-hd .sync .sdot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--c-accent-2);
+      box-shadow: 0 0 8px var(--c-accent-2);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .cp-hd .div { width: 1px; height: 22px; background: var(--border-soft); }
+    .cp-hd .switcher {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 10px;
+      background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px;
+      font-family: var(--mono); font-size: 11px;
+      cursor: pointer;
+    }
+    .cp-hd .switcher:hover { border-color: var(--c-accent); }
+    .cp-hd .spill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 10px;
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.3);
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-0);
+      cursor: pointer;
+    }
+    .cp-hd .spill .play {
+      width: 0; height: 0;
+      border-left: 6px solid var(--c-accent);
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+    }
+    .cp-hd .spill .prog {
+      width: 60px; height: 4px;
+      background: var(--bg-3); border-radius: 2px; overflow: hidden;
+      position: relative;
+    }
+    .cp-hd .spill .prog::after {
+      content: '';
+      position: absolute; inset: 0;
+      width: 62%;
+      background: linear-gradient(90deg, var(--c-accent), var(--c-accent-2));
+      border-radius: 2px;
+    }
+    .cp-hd .grow { flex: 1; }
+    .cp-hd .tabs {
+      display: inline-flex;
+      background: var(--bg-0);
+      border: 1px solid var(--border-soft);
+      border-radius: 7px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .cp-hd .tabs .tab {
+      padding: 5px 12px;
+      border-radius: 5px;
+      font-size: 11.5px;
+      color: var(--text-2);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .cp-hd .tabs .tab:hover { color: var(--text-1); }
+    .cp-hd .tabs .tab.active { background: var(--bg-3); color: var(--text-0); }
+    .cp-hd .iconbtn {
+      width: 30px; height: 30px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-2); border: 1px solid var(--border-soft); border-radius: 6px;
+      color: var(--text-2);
+      font-size: 13px;
+      cursor: pointer;
+      position: relative;
+    }
+    .cp-hd .iconbtn:hover { color: var(--text-0); border-color: var(--c-accent); }
+    .cp-hd .iconbtn .ndot {
+      position: absolute; top: 4px; right: 4px;
+      width: 6px; height: 6px;
+      background: var(--c-warn); border-radius: 50%;
+      box-shadow: 0 0 5px var(--c-warn);
+    }
+    .cp-hd .acct {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 8px 4px 4px;
+      background: var(--bg-2); border: 1px solid var(--border-soft); border-radius: 999px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .cp-hd .acct .av {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: linear-gradient(135deg, #38bdf8, #a78bfa);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 10px; color: #fff; font-weight: 700;
+    }
+
+    /* ─── main pane ─── */
+    .cp-main {
+      grid-area: main;
+      overflow-y: auto;
+      padding: 18px 22px;
+      position: relative;
+    }
+    .route { display: none; }
+    .route.active { display: flex; flex-direction: column; gap: 14px; animation: routeIn 0.25s ease; }
+    @keyframes routeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ─── right rail ─── */
+    .cp-rail {
+      grid-area: rail;
+      background: var(--bg-1);
+      border-left: 1px solid var(--border-soft);
+      padding: 14px;
+      overflow-y: auto;
+      display: flex; flex-direction: column; gap: 14px;
+      font-family: var(--mono); font-size: 10.5px;
+    }
+    .rail-seg .rh {
+      font-size: 9px; letter-spacing: 0.14em; color: var(--text-3);
+      margin-bottom: 6px;
+      display: flex; justify-content: space-between;
+    }
+    .rail-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 11px;
+      padding: 1px 0;
+    }
+    .rail-row .l { color: var(--text-2); }
+    .rail-row .v { color: var(--text-0); font-weight: 600; }
+    .rail-row .v.warn { color: var(--c-warn); }
+    .rail-row .v.lifetime { color: var(--c-accent); font-size: 13px; }
+    .rail-bar {
+      height: 5px; background: var(--bg-3); border-radius: 3px; overflow: hidden;
+      position: relative; margin: 4px 0 2px;
+    }
+    .rail-bar .f { position: absolute; inset: 0; }
+    .rail-bar .f.ok { background: var(--c-accent-2); }
+    .rail-bar .f.warn { background: var(--c-warn); }
+    .rail-reset { font-size: 9px; color: var(--text-3); margin-top: 2px; }
+    .rail-cost {
+      background: linear-gradient(180deg, rgba(56,189,248,0.06), transparent);
+      border: 1px solid rgba(56,189,248,0.18);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .rail-cost .lifetime-row {
+      border-top: 1px solid rgba(56,189,248,0.25);
+      margin-top: 4px; padding-top: 4px;
+    }
+    .rail-spark {
+      height: 24px; display: flex; align-items: flex-end; gap: 2px;
+      margin-top: 6px;
+    }
+    .rail-spark i {
+      flex: 1; background: rgba(56,189,248,0.4); border-radius: 1px;
+      min-height: 2px;
+    }
+    .rail-spark i.hi { background: var(--c-accent); }
+    .activity .a {
+      font-size: 10px; color: var(--text-2);
+      padding: 4px 0;
+      border-top: 1px dashed var(--border-soft);
+    }
+    .activity .a:first-of-type { border-top: none; }
+    .activity .a .ts { color: var(--text-3); margin-right: 5px; }
+    .activity .a .sid { color: var(--c-accent); }
+    .rail-seg + .rail-seg { padding-top: 12px; border-top: 1px solid var(--border-soft); }
+
+    /* ════════════════ DASHBOARD ROUTE ════════════════ */
+    .hero {
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .hero-top {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 14px;
+      align-items: center;
+    }
+    .hero .pname {
+      font-family: var(--mono); font-size: 14px;
+      color: var(--text-0); font-weight: 600;
+    }
+    .pstate {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 2px 8px;
+      background: rgba(56,189,248,0.12);
+      color: var(--c-accent);
+      border: 1px solid rgba(56,189,248,0.3);
+      border-radius: 999px;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      margin-left: 6px;
+    }
+    .pstate .pdot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--c-accent); box-shadow: 0 0 5px var(--c-accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .psub { color: var(--text-2); font-size: 10.5px; margin-top: 3px; font-family: var(--mono); }
+    .pcost {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+      padding: 12px 14px;
+      background: var(--bg-0);
+      border-radius: 8px;
+      border: 1px solid var(--border-soft);
+    }
+    .pcost .pstat {
+      display: flex; flex-direction: column; gap: 3px;
+      border-right: 1px solid var(--border-soft); padding-right: 14px;
+    }
+    .pcost .pstat:last-child { border-right: none; }
+    .pcost .pstat .l {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); letter-spacing: 0.14em; text-transform: uppercase;
+    }
+    .pcost .pstat .v {
+      font-family: var(--mono); font-size: 22px;
+      color: var(--text-0); font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .pcost .pstat .v.lifetime { color: var(--c-accent); }
+    .pcost .pstat .sub {
+      font-family: var(--mono); font-size: 9.5px; color: var(--text-2);
+      display: flex; gap: 8px;
+    }
+    .pcost .pstat .sub .delta { color: var(--c-accent-2); }
+    .pcost .pstat .sub .delta.up { color: var(--c-warn); }
+    .health {
+      display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px;
+      padding: 4px 4px 0;
+    }
+    .health .h {
+      display: flex; flex-direction: column; gap: 2px;
+      padding-left: 10px;
+      border-left: 2px solid var(--border-soft);
+    }
+    .health .h.alert { border-left-color: var(--c-warn); }
+    .health .h .l { font-family: var(--mono); font-size: 8.5px; color: var(--text-3); letter-spacing: 0.1em; text-transform: uppercase; }
+    .health .h .v { font-family: var(--mono); font-size: 13px; color: var(--text-0); font-weight: 600; }
+    .health .h .v.ok { color: var(--c-accent-2); }
+    .health .h .v.warn { color: var(--c-warn); }
+    .health .h .trend { font-family: var(--mono); font-size: 9px; color: var(--text-3); }
+    .health .h .trend.up { color: var(--c-accent-2); }
+    .health .h .trend.dn { color: var(--c-failed); }
+
+    .dash-grid { display: grid; grid-template-columns: 1fr 240px; gap: 14px; }
+
+    .section-title {
+      display: flex; align-items: baseline; gap: 8px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.16em;
+      text-transform: uppercase;
+      margin: 8px 0 2px;
+    }
+    .section-title .count {
+      color: var(--c-accent);
+      background: rgba(56,189,248,0.1);
+      padding: 1px 6px; border-radius: 4px;
+      letter-spacing: 0;
+    }
+    .srow {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: grid;
+      grid-template-columns: auto 1fr auto auto auto;
+      gap: 12px;
+      align-items: center;
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease;
+    }
+    .srow:hover { transform: translateX(2px); border-color: var(--bg-3); }
+    .srow.active { border-color: rgba(56,189,248,0.4); background: linear-gradient(90deg, rgba(56,189,248,0.06), var(--bg-1) 30%); }
+    .srow .stitle { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .srow .stitle .t { font-family: var(--mono); font-size: 11.5px; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .srow .stitle .s { color: var(--text-3); font-size: 10px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 7px; border-radius: 999px;
+      font-family: var(--mono); font-size: 9.5px;
+      letter-spacing: 0.08em;
+    }
+    .pill.executing { background: rgba(56,189,248,0.15); color: var(--c-accent); }
+    .pill.signoff { background: rgba(251,191,36,0.15); color: var(--c-warn); }
+    .pill.complete { background: rgba(52,211,153,0.15); color: var(--c-accent-2); }
+    .pill.planned { background: var(--bg-3); color: var(--text-2); border: 1px solid var(--border-soft); }
+    .srow .smeta { font-family: var(--mono); font-size: 10px; color: var(--text-2); text-align: right; }
+    .srow .smeta b { color: var(--text-0); font-weight: 600; }
+    .smini { display: flex; gap: 2px; }
+    .smini i { width: 14px; height: 6px; border-radius: 1px; background: var(--bg-3); }
+    .smini i.work { background: var(--c-work); }
+    .smini i.pr { background: var(--c-pr); }
+    .smini i.review { background: var(--c-review); }
+    .smini i.merged { background: var(--c-merged); }
+    .smini i.idle { background: var(--c-blocked); }
+    .srow .open {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--c-accent);
+      padding: 4px 8px;
+      background: rgba(56,189,248,0.08);
+      border: 1px solid rgba(56,189,248,0.25);
+      border-radius: 5px;
+    }
+
+    .inbox {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+      align-self: start;
+    }
+    .inbox .ih {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 0.14em;
+    }
+    .inbox .ih .cnt {
+      color: var(--c-warn); background: rgba(251,191,36,0.1);
+      padding: 1px 6px; border-radius: 4px; letter-spacing: 0;
+    }
+    .inbox .ibullet {
+      font-size: 10.5px; color: var(--text-1); line-height: 1.45;
+      padding: 6px 8px; background: var(--bg-2);
+      border-left: 2px solid var(--c-warn);
+      border-radius: 0 4px 4px 0;
+    }
+    .inbox .ibullet .src {
+      display: block;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); margin-top: 3px;
+    }
+    .inbox .ic {
+      font-family: var(--mono); font-size: 9.5px; color: var(--c-accent);
+      padding: 5px 0; text-align: center; cursor: pointer;
+    }
+
+    /* ════════════════ SPRINT ROUTE ════════════════ */
+    .stepper {
+      display: flex; align-items: center; gap: 0;
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 12px;
+      padding: 16px 18px;
+      position: relative;
+    }
+    .step {
+      flex: 1;
+      display: flex; flex-direction: column; align-items: center;
+      position: relative; z-index: 1;
+    }
+    .step .dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: var(--bg-3); border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 11px; color: var(--text-3);
+    }
+    .step.done .dot { background: var(--c-accent-2); border-color: var(--c-accent-2); color: #04201a; }
+    .step.curr .dot {
+      background: var(--c-accent); border-color: var(--c-accent); color: #052735;
+      box-shadow: 0 0 0 4px rgba(56,189,248,0.15), 0 0 14px rgba(56,189,248,0.5);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .step .lbl { margin-top: 8px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-2); text-transform: uppercase; text-align: center; }
+    .step.curr .lbl { color: var(--c-accent); font-weight: 600; }
+    .step.done .lbl { color: var(--text-1); }
+    .step .dur { margin-top: 3px; font-family: var(--mono); font-size: 9.5px; color: var(--text-3); }
+    .step.curr .dur { color: var(--c-accent); }
+    .step.done .dur { color: var(--text-2); }
+    .step::after { content: ''; position: absolute; top: 14px; left: 50%; width: 100%; height: 2px; background: var(--border); z-index: -1; }
+    .step:last-child::after { display: none; }
+    .step.done::after, .step.curr::after { background: var(--c-accent-2); }
+    .sub-rail { margin-top: 4px; display: flex; gap: 2px; }
+    .sub-rail i { width: 11px; height: 5px; border-radius: 1px; background: var(--bg-3); }
+    .sub-rail i.merged { background: var(--c-merged); }
+    .sub-rail i.review { background: var(--c-review); }
+    .sub-rail i.work { background: var(--c-work); }
+
+    .aux {
+      display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+      padding: 10px 16px;
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-2);
+    }
+    .aux .saxlbl { font-size: 9px; letter-spacing: 0.12em; color: var(--text-3); }
+    .aux .sst { display: inline-flex; gap: 5px; align-items: baseline; }
+    .aux .sst b { color: var(--text-0); font-size: 11.5px; font-weight: 600; }
+    .aux .sst b.ok { color: var(--c-accent-2); }
+    .aux .div { width: 1px; height: 14px; background: var(--border-soft); }
+
+    /* ─── lanes hybrid 2 ─── */
+    .gantt {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .gtime {
+      display: flex; justify-content: space-between;
+      padding: 0 0 8px 64px;
+      margin-bottom: 6px;
+      border-bottom: 1px solid var(--border-soft);
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+    .gtime .now { color: var(--c-accent); font-weight: 600; }
+    .glane {
+      display: grid;
+      grid-template-columns: 56px 1fr;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .glane:last-child { border-bottom: none; }
+    .glane .glbl {
+      font-family: var(--mono); font-size: 10.5px; color: var(--text-1);
+    }
+    .gtrack {
+      position: relative; height: 28px;
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .gtrack.idle {
+      background: repeating-linear-gradient(45deg, var(--bg-2), var(--bg-2) 8px, var(--bg-1) 8px, var(--bg-1) 16px);
+    }
+    .gblock {
+      position: absolute;
+      top: 3px; bottom: 3px;
+      padding: 4px 8px;
+      display: flex; align-items: center;
+      font-family: var(--mono); font-size: 10px;
+      color: #fff;
+      border-radius: 4px;
+    }
+    .gblock.merged { background: linear-gradient(180deg, rgba(52,211,153,0.55), rgba(52,211,153,0.3)); border: 1px solid rgba(52,211,153,0.6); }
+    .gblock.work { background: linear-gradient(180deg, rgba(56,189,248,0.7), rgba(56,189,248,0.5)); border: 1px solid var(--c-work); box-shadow: 0 0 10px rgba(56,189,248,0.3); }
+    .gblock.review { background: linear-gradient(180deg, rgba(251,191,36,0.65), rgba(251,191,36,0.45)); border: 1px solid var(--c-review); }
+    .gghost {
+      position: absolute;
+      top: 3px; bottom: 3px;
+      border: 1px dashed var(--border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      display: flex; align-items: center;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      background: rgba(56,189,248,0.03);
+    }
+    .gready {
+      position: absolute;
+      top: 3px; bottom: 3px;
+      border: 1px dashed rgba(56,189,248,0.4);
+      border-radius: 4px;
+      padding: 4px 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--mono); font-size: 8.5px;
+      color: var(--c-accent);
+      letter-spacing: 0.1em;
+      background: rgba(56,189,248,0.05);
+    }
+    .gnow-line {
+      position: absolute;
+      top: -2px; bottom: -2px;
+      width: 2px;
+      background: var(--c-accent);
+      box-shadow: 0 0 8px var(--c-accent);
+      z-index: 5;
+    }
+
+    .split-tag {
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      letter-spacing: 0.14em;
+      margin: 4px 4px 0;
+      padding-bottom: 4px;
+      border-bottom: 1px dashed var(--border-soft);
+    }
+    .split-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .lcard {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+    .lcard::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+    .lcard.work::before { background: var(--c-work); }
+    .lcard.review::before { background: var(--c-review); }
+    .lcard.idle::before { background: var(--c-blocked); }
+    .lcard .lh { display: flex; align-items: center; gap: 8px; }
+    .lcard .lh .lname { font-family: var(--mono); font-size: 11.5px; color: var(--text-0); font-weight: 600; }
+    .pill.work { background: rgba(56,189,248,0.15); color: var(--c-work); }
+    .pill.work .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--c-work); box-shadow: 0 0 5px var(--c-work); animation: pulse 2s ease-in-out infinite; }
+    .pill.review .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--c-review); box-shadow: 0 0 5px var(--c-review); }
+    .pill.idle { background: var(--bg-3); color: var(--text-3); }
+    .pill.idle .dt { width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); }
+    .lcard .ttl { font-size: 11px; color: var(--text-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lcard .lmeters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .lcard .mt { font-family: var(--mono); font-size: 8.5px; color: var(--text-3); letter-spacing: 0.08em; }
+    .lcard .mv { font-family: var(--mono); font-size: 10px; color: var(--text-0); font-weight: 600; }
+    .lcard .mv.warn { color: var(--c-warn); }
+    .lcard .bar { height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; position: relative; margin-top: 2px; }
+    .lcard .bar .f { position: absolute; inset: 0; }
+    .lcard .bar .f.work { background: var(--c-work); }
+    .lcard .bar .f.warn { background: var(--c-warn); }
+    .idle-msg {
+      padding: 16px;
+      border: 1px dashed var(--border);
+      border-radius: 5px;
+      text-align: center;
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3);
+      letter-spacing: 0.1em;
+    }
+    .queue-strip {
+      background: var(--bg-1);
+      border: 1px dashed var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; align-items: center; gap: 10px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+    }
+    .qchip {
+      display: inline-flex; gap: 4px; align-items: center;
+      padding: 3px 8px; background: var(--bg-2);
+      border: 1px solid var(--border-soft); border-radius: 5px;
+      color: var(--text-1);
+    }
+    .qchip .id { color: var(--c-accent); }
+    .qchip.ready { border-color: rgba(52,211,153,0.3); }
+    .qchip.ready .id { color: var(--c-accent-2); }
+
+    /* ─── slice cards list ─── */
+    .slist { display: flex; flex-direction: column; gap: 10px; }
+    .scard {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 10px;
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    .scard:hover { border-color: rgba(56,189,248,0.3); transform: translateY(-1px); }
+    .scard.work-state { border-color: rgba(56,189,248,0.35); background: linear-gradient(180deg, rgba(56,189,248,0.04), var(--bg-1)); }
+    .scard.review-state { border-color: rgba(251,191,36,0.3); }
+    .scard.merged-state { border-color: rgba(52,211,153,0.25); opacity: 0.92; }
+    .scard::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
+    .scard.work-state::before { background: var(--c-work); }
+    .scard.review-state::before { background: var(--c-review); }
+    .scard.merged-state::before { background: var(--c-merged); }
+    .scard.blocked-state::before { background: var(--c-blocked); }
+    .scard.blocked-state { opacity: 0.7; }
+    .row1 { display: flex; align-items: center; gap: 10px; }
+    .row1 .sid { font-family: var(--mono); font-size: 10px; color: var(--c-accent); background: rgba(56,189,248,0.1); padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+    .row1 .stt { font-size: 13px; font-weight: 600; color: var(--text-0); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bdg { font-family: var(--mono); font-size: 9px; padding: 2px 6px; border-radius: 3px; letter-spacing: 0.1em; }
+    .bdg.afk { background: rgba(56,189,248,0.1); color: var(--c-accent); }
+    .bdg.lane { background: var(--bg-3); color: var(--text-1); }
+    .spill {
+      font-family: var(--mono); font-size: 9.5px;
+      padding: 3px 8px; border-radius: 999px;
+      letter-spacing: 0.1em;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .spill.work { background: rgba(56,189,248,0.15); color: var(--c-work); }
+    .spill.work .pd { width: 6px; height: 6px; background: var(--c-work); border-radius: 50%; box-shadow: 0 0 6px var(--c-work); animation: pulse 2s ease-in-out infinite; }
+    .spill.review { background: rgba(251,191,36,0.15); color: var(--c-review); }
+    .spill.review .pd { width: 6px; height: 6px; background: var(--c-review); border-radius: 50%; box-shadow: 0 0 6px var(--c-review); animation: pulse 2s ease-in-out infinite; }
+    .spill.merged { background: rgba(52,211,153,0.15); color: var(--c-merged); }
+    .spill.merged .pd { width: 6px; height: 6px; background: var(--c-merged); border-radius: 50%; }
+    .spill.blocked { background: var(--bg-3); color: var(--text-2); }
+    .meters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .meter { display: flex; flex-direction: column; gap: 4px; }
+    .meter .mhead { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--mono); font-size: 9.5px; }
+    .meter .mhead .ml { color: var(--text-3); letter-spacing: 0.1em; }
+    .meter .mhead .mv { color: var(--text-0); font-size: 10.5px; font-weight: 600; }
+    .meter .mhead .mv.warn { color: var(--c-warn); }
+    .mbar { height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden; position: relative; }
+    .mbar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; transition: width 0.4s ease; }
+    .mbar .fill.work { background: linear-gradient(90deg, var(--c-work), #7dd3fc); }
+    .mbar .fill.warn { background: linear-gradient(90deg, var(--c-warn), #fde68a); }
+    .stats { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-family: var(--mono); font-size: 10.5px; color: var(--text-2); }
+    .stats .s { display: inline-flex; align-items: center; gap: 5px; }
+    .stats .s .l { color: var(--text-3); font-size: 9.5px; letter-spacing: 0.1em; }
+    .stats .s .v { color: var(--text-0); font-weight: 600; }
+    .stats .s .v.warn { color: var(--c-warn); }
+    .stats .sep { color: var(--text-3); }
+    .stats .grow { flex: 1; }
+    .stats .iconmini {
+      width: 22px; height: 22px;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-2); border: 1px solid var(--border-soft);
+      border-radius: 4px; color: var(--text-2);
+      font-size: 10px; cursor: pointer;
+    }
+    .stats .iconmini:hover { color: var(--c-accent); border-color: var(--c-accent); }
+    .traverse {
+      display: flex; gap: 0; align-items: center;
+      font-family: var(--mono); font-size: 9px; color: var(--text-3);
+      margin-top: 2px;
+    }
+    .traverse .st { padding: 2px 7px; border-radius: 3px; background: var(--bg-2); border: 1px solid var(--border-soft); }
+    .traverse .st.done { background: rgba(52,211,153,0.08); color: var(--c-accent-2); border-color: rgba(52,211,153,0.2); }
+    .traverse .st.curr { background: rgba(56,189,248,0.12); color: var(--c-accent); border-color: rgba(56,189,248,0.3); }
+    .traverse .arr { color: var(--text-3); padding: 0 4px; }
+    .traverse .retry { color: var(--c-warn); background: rgba(251,191,36,0.1); padding: 1px 5px; border-radius: 3px; margin-left: 4px; }
+
+    /* ════════════════ SETTINGS ROUTE ════════════════ */
+    .stabs {
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 14px;
+    }
+    .lnav {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 8px;
+      display: flex; flex-direction: column; gap: 2px;
+      align-self: start;
+    }
+    .lnav .nv {
+      padding: 9px 12px;
+      border-radius: 6px;
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--text-2);
+      cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .lnav .nv:hover { background: var(--bg-2); color: var(--text-1); }
+    .lnav .nv.active {
+      background: rgba(56,189,248,0.1); color: var(--c-accent);
+      border-left: 2px solid var(--c-accent);
+      padding-left: 10px;
+    }
+    .lnav .nv .ico { width: 14px; opacity: 0.6; }
+    .lnav .sep { height: 1px; background: var(--border-soft); margin: 6px 8px; }
+    .lnav .nv .badge { margin-left: auto; font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--bg-3); color: var(--text-3); }
+    .rpanel { display: flex; flex-direction: column; gap: 12px; }
+    .panel {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .panel .sh {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.14em;
+      padding: 12px 16px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .field {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 14px;
+      padding: 14px 18px;
+      align-items: center;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .field:last-child { border-bottom: none; }
+    .field .fl { font-size: 12px; color: var(--text-0); font-weight: 500; }
+    .field .fl .desc { font-size: 11px; color: var(--text-2); font-weight: 400; margin-top: 3px; }
+    .field .fc { display: flex; align-items: center; gap: 8px; }
+    .input { background: var(--bg-2); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: 11.5px; color: var(--text-0); min-width: 200px; }
+    .input.wide { min-width: 320px; }
+    .input.short { min-width: 80px; }
+    .badgep { font-family: var(--mono); font-size: 9.5px; padding: 2px 7px; border-radius: 4px; letter-spacing: 0.1em; }
+    .badgep.ok { background: rgba(52,211,153,0.15); color: var(--c-accent-2); }
+    .slider { width: 220px; -webkit-appearance: none; height: 6px; background: var(--bg-3); border-radius: 3px; }
+    .slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--c-accent); border-radius: 50%; box-shadow: 0 0 6px var(--c-accent); }
+
+    /* ════════════════ DRAWER ════════════════ */
+    .drawer-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(1.5px);
+      z-index: 90;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+    .drawer {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      width: 55%;
+      max-width: 900px;
+      background: var(--bg-1);
+      border-left: 2px solid var(--c-accent);
+      box-shadow: -16px 0 40px rgba(0,0,0,0.55), -2px 0 0 rgba(56,189,248,0.4);
+      z-index: 95;
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      transform: translateX(100%);
+      transition: transform 0.3s ease-out;
+    }
+    .drawer.open { transform: translateX(0); }
+    .dhd {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border-soft);
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      display: flex; align-items: flex-start; gap: 14px;
+    }
+    .dhd .grow { flex: 1; min-width: 0; }
+    .dhd .sid {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--c-accent);
+      background: rgba(56,189,248,0.1);
+      padding: 3px 8px; border-radius: 4px;
+      display: inline-block; margin-bottom: 6px;
+    }
+    .dhd h2 { margin: 0; font-size: 18px; color: var(--text-0); font-weight: 600; }
+    .dhd .meta {
+      margin-top: 6px;
+      display: flex; gap: 10px; align-items: center;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .dhd .close {
+      background: var(--bg-2); border: 1px solid var(--border);
+      color: var(--text-2);
+      width: 30px; height: 30px;
+      border-radius: 6px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 14px; cursor: pointer;
+    }
+    .dhd .close:hover { color: var(--text-0); border-color: var(--c-accent); }
+    .dactions {
+      padding: 10px 18px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border-soft);
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    .actbtn { padding: 7px 12px; border-radius: 5px; font-family: var(--mono); font-size: 11px; cursor: pointer; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 6px; }
+    .actbtn.primary { background: var(--c-accent); color: #052735; font-weight: 700; }
+    .actbtn.ghost { background: var(--bg-3); color: var(--text-1); border-color: var(--border); }
+    .actbtn.warn { background: rgba(251,191,36,0.15); color: var(--c-warn); border-color: rgba(251,191,36,0.3); }
+    .actbtn.danger { background: rgba(248,113,113,0.12); color: var(--c-failed); border-color: rgba(248,113,113,0.3); }
+    .actbtn.disabled { background: var(--bg-2); color: var(--text-3); border-color: var(--border-soft); cursor: not-allowed; }
+    .actbtn.disabled::after { content: ' 🔒'; font-size: 9px; }
+    .gate-note {
+      margin: 10px 18px 0;
+      padding: 10px 14px;
+      background: rgba(251,191,36,0.06);
+      border: 1px solid rgba(251,191,36,0.25);
+      border-radius: 6px;
+      font-size: 11.5px; color: var(--text-1); line-height: 1.5;
+      display: flex; gap: 10px; align-items: flex-start;
+    }
+    .gate-note .gico { font-size: 14px; color: var(--c-warn); }
+    .dbody { flex: 1; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+    .sect { background: var(--bg-2); border: 1px solid var(--border-soft); border-radius: 8px; overflow: hidden; }
+    .sect .sh { padding: 10px 14px; background: var(--bg-3); border-bottom: 1px solid var(--border-soft); font-family: var(--mono); font-size: 10px; color: var(--text-3); letter-spacing: 0.14em; display: flex; justify-content: space-between; }
+    .sect .sb { padding: 12px 14px; }
+    .ogrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .ogrid .k { font-family: var(--mono); font-size: 9.5px; color: var(--text-3); letter-spacing: 0.1em; margin-bottom: 3px; }
+    .ogrid .v { font-family: var(--mono); font-size: 11.5px; color: var(--text-0); }
+    .ogrid .v.warn { color: var(--c-warn); }
+    .ac { display: flex; flex-direction: column; gap: 6px; }
+    .ac-item { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; color: var(--text-1); }
+    .ac-item .box { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; border-radius: 3px; border: 1px solid var(--border); background: var(--bg-3); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; }
+    .ac-item.done .box { background: var(--c-accent-2); border-color: var(--c-accent-2); color: #04201a; }
+    .ac-item.done .t { text-decoration: line-through; color: var(--text-3); }
+    .ac-item.run .box { border-color: var(--c-work); color: var(--c-work); }
+    .timeline { position: relative; }
+    .timeline .tspine { position: absolute; top: 14px; bottom: 14px; left: 11px; width: 2px; background: var(--border); }
+    .tevent { position: relative; padding-left: 28px; padding-bottom: 14px; }
+    .tevent:last-child { padding-bottom: 0; }
+    .tevent::before { content: ''; position: absolute; left: 5px; top: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--bg-3); border: 2px solid var(--border); box-sizing: border-box; }
+    .tevent.done::before { background: var(--c-accent-2); border-color: var(--c-accent-2); }
+    .tevent.current::before { background: var(--c-accent); border-color: var(--c-accent); box-shadow: 0 0 0 4px rgba(56,189,248,0.2); animation: pulse 2s ease-in-out infinite; }
+    .tevent.retry::before { background: var(--c-warn); border-color: var(--c-warn); }
+    .tevent .head { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); font-size: 11px; }
+    .tevent .nm { color: var(--text-0); font-size: 11.5px; font-weight: 600; }
+    .tevent.done .nm { color: var(--text-1); }
+    .tevent.current .nm { color: var(--c-accent); }
+    .tevent.retry .nm { color: var(--c-warn); }
+    .tevent .ts { color: var(--text-3); font-size: 10px; }
+    .tevent .dur { color: var(--text-2); font-size: 10px; margin-left: auto; }
+    .tevent .detail { color: var(--text-2); font-size: 11px; margin-top: 4px; line-height: 1.45; }
+
+    /* floating hint */
+    .hint {
+      position: fixed; bottom: 14px; left: 14px;
+      background: var(--bg-1);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+      z-index: 100;
+      max-width: 320px;
+      line-height: 1.5;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .hint b { color: var(--c-accent); }
+    .hint kbd {
+      background: var(--bg-3); border: 1px solid var(--border);
+      padding: 1px 5px; border-radius: 3px;
+      font-size: 10px; color: var(--text-0);
+    }
+  </style>
+</head>
+<body>
+
+<div class="cp">
+
+  <!-- ════════════════ HEADER ════════════════ -->
+  <header class="cp-hd">
+    <span class="logo">▟ naml</span>
+    <span class="sync"><span class="sdot"></span>Synced 2s</span>
+    <span class="div"></span>
+    <span class="switcher">inpolicy/web <span style="color: var(--text-3)">▾</span></span>
+    <span class="spill" onclick="route('sprint')">
+      <span class="play"></span>
+      2026-05-19-html-renderer
+      <span class="prog"></span>
+      <span style="color: var(--text-2)">5/8</span>
+    </span>
+    <span class="grow"></span>
+    <span class="tabs">
+      <span class="tab" data-route="dashboard" onclick="route('dashboard')">Dashboard</span>
+      <span class="tab active" data-route="sprint" onclick="route('sprint')">Sprint</span>
+      <span class="tab" data-route="settings" onclick="route('settings')">Settings</span>
+    </span>
+    <span class="iconbtn">🔔<span class="ndot"></span></span>
+    <span class="acct"><span class="av">YE</span>personal</span>
+    <span class="iconbtn">⚙</span>
+  </header>
+
+  <!-- ════════════════ MAIN PANE ════════════════ -->
+  <main class="cp-main">
+
+    <!-- ──────── DASHBOARD ROUTE ──────── -->
+    <section class="route" id="route-dashboard">
+      <div class="hero">
+        <div class="hero-top">
+          <div>
+            <span class="pname">inpolicy/web</span>
+            <span class="pstate"><span class="pdot"></span>ACTIVE</span>
+            <div class="psub">3 lanes · main · 14 sprints shipped · last merge 22m ago</div>
+          </div>
+          <div style="font-family: var(--mono); font-size: 10px; color: var(--text-3); text-align: right;">
+            ↘ daily burn <span style="color: var(--text-0); font-weight: 600;">$5.92 avg · 7d</span>
+          </div>
+        </div>
+        <div class="pcost">
+          <div class="pstat">
+            <div class="l">TODAY</div>
+            <div class="v">$4.21</div>
+            <div class="sub"><span>9.2M tokens</span><span class="delta up">+18%</span></div>
+          </div>
+          <div class="pstat">
+            <div class="l">THIS WEEK</div>
+            <div class="v">$24.80</div>
+            <div class="sub"><span>56M</span><span class="delta">-12%</span></div>
+          </div>
+          <div class="pstat">
+            <div class="l">LAST 30 DAYS</div>
+            <div class="v">$118.42</div>
+            <div class="sub"><span>218M</span></div>
+          </div>
+          <div class="pstat">
+            <div class="l">LIFETIME · PROJECT</div>
+            <div class="v lifetime">$342.16</div>
+            <div class="sub"><span>since 2026-03-14</span></div>
+          </div>
+        </div>
+        <div class="health">
+          <div class="h"><span class="l">TIER-1 · 7d</span><span class="v ok">78%</span><span class="trend up">+4pp ↗</span></div>
+          <div class="h"><span class="l">AVG SPRINT</span><span class="v">37m</span><span class="trend up">-3m ↘</span></div>
+          <div class="h"><span class="l">SPRINTS / WK</span><span class="v">5</span><span class="trend">±0</span></div>
+          <div class="h alert"><span class="l">SLICE FAIL</span><span class="v warn">5.6%</span><span class="trend dn">+1.2pp</span></div>
+          <div class="h"><span class="l">LGTM 1ST</span><span class="v ok">82%</span><span class="trend up">+2pp</span></div>
+          <div class="h"><span class="l">REVIEW ITER</span><span class="v">1.2</span><span class="trend">stable</span></div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <div class="section-title">ACTIVE <span class="count">1</span></div>
+          <div class="srow active" onclick="route('sprint')">
+            <div class="smini">
+              <i class="merged"></i><i class="merged"></i><i class="review"></i><i class="work"></i><i class="work"></i><i class="idle"></i><i class="idle"></i><i class="idle"></i>
+            </div>
+            <div class="stitle">
+              <div class="t">2026-05-19-html-renderer</div>
+              <div class="s">started 21m ago · 3 lanes active</div>
+            </div>
+            <span class="pill executing">EXECUTING</span>
+            <div class="smeta">slices <b>5/8</b><br>cost <b>$2.41</b></div>
+            <div class="open">OPEN →</div>
+          </div>
+
+          <div class="section-title" style="margin-top: 6px;">QUEUED <span class="count">2</span></div>
+          <div class="srow">
+            <div class="smini"><i></i><i></i><i></i><i></i></div>
+            <div class="stitle">
+              <div class="t">2026-05-20-eval-harness <span style="color: var(--text-3); font-size: 9px">↳ feedback</span></div>
+              <div class="s">parent: html-renderer · 3 slices</div>
+            </div>
+            <span class="pill planned">PLANNED</span>
+            <div class="smeta">est <b>~14m</b></div>
+            <div class="open">OPEN →</div>
+          </div>
+          <div class="srow">
+            <div class="smini"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="stitle">
+              <div class="t">2026-05-21-policy-validator</div>
+              <div class="s">greenfield · 6 slices</div>
+            </div>
+            <span class="pill planned">PLANNED</span>
+            <div class="smeta">est <b>~32m</b></div>
+            <div class="open">OPEN →</div>
+          </div>
+
+          <div class="section-title" style="margin-top: 6px;">RECENT <span class="count">last 2</span></div>
+          <div class="srow">
+            <div class="smini"><i class="merged"></i><i class="merged"></i><i class="merged"></i><i class="merged"></i><i class="merged"></i></div>
+            <div class="stitle">
+              <div class="t">2026-05-18-config-rename</div>
+              <div class="s">5 slices · 28m</div>
+            </div>
+            <span class="pill complete">COMPLETE</span>
+            <div class="smeta">tier-1 <b>5/5</b></div>
+            <div class="open">VIEW →</div>
+          </div>
+          <div class="srow">
+            <div class="smini"><i class="merged"></i><i class="merged"></i><i class="merged"></i></div>
+            <div class="stitle">
+              <div class="t">2026-05-17-feedback-skill</div>
+              <div class="s">3 slices · 19m</div>
+            </div>
+            <span class="pill complete">COMPLETE</span>
+            <div class="smeta">tier-1 <b>3/3</b></div>
+            <div class="open">VIEW →</div>
+          </div>
+        </div>
+
+        <div class="inbox">
+          <div class="ih"><span>FEEDBACK INBOX</span><span class="cnt">4 unfiled</span></div>
+          <div class="ibullet">
+            Slider doesn't snap to grid values.
+            <span class="src">2026-05-19 · target: html-renderer</span>
+          </div>
+          <div class="ibullet">
+            HTML output uses <code>&lt;b&gt;</code> instead of <code>&lt;strong&gt;</code>.
+            <span class="src">2026-05-19 · target: html-renderer</span>
+          </div>
+          <div class="ibullet">
+            API response missing <code>created_at</code>.
+            <span class="src">2026-05-18 · target: html-renderer</span>
+          </div>
+          <div class="ic">/grill-feedback →</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────── SPRINT ROUTE ──────── -->
+    <section class="route active" id="route-sprint">
+      <!-- stepper -->
+      <div class="stepper">
+        <div class="step done"><div class="dot">✓</div><div class="lbl">Planning</div><div class="dur">12s</div></div>
+        <div class="step done"><div class="dot">✓</div><div class="lbl">Publishing</div><div class="dur">4s</div></div>
+        <div class="step curr">
+          <div class="dot">▶</div>
+          <div class="lbl">Executing</div>
+          <div class="dur">21m · ETA 14m</div>
+          <div class="sub-rail">
+            <i class="merged"></i><i class="merged"></i><i class="review"></i><i class="work"></i><i class="work"></i><i></i><i></i><i></i>
+          </div>
+        </div>
+        <div class="step"><div class="dot">3</div><div class="lbl">Awaiting sign-off</div><div class="dur">—</div></div>
+        <div class="step"><div class="dot">4</div><div class="lbl">Merging</div><div class="dur">—</div></div>
+        <div class="step"><div class="dot">5</div><div class="lbl">Complete</div><div class="dur">—</div></div>
+      </div>
+
+      <!-- aux -->
+      <div class="aux">
+        <span class="saxlbl">LIVE SPRINT</span>
+        <span class="sst">elapsed <b>21m 14s</b></span>
+        <span class="div"></span>
+        <span class="sst">eta <b class="ok">~14m</b></span>
+        <span class="div"></span>
+        <span class="sst">cost so far <b>$2.41</b></span>
+        <span class="div"></span>
+        <span class="sst">proj total <b>$3.92</b></span>
+        <span class="div"></span>
+        <span class="sst">lanes <b>3 / 3</b></span>
+        <span class="div"></span>
+        <span class="sst">slices <b>5 / 8</b></span>
+        <span class="div"></span>
+        <span class="sst">retries <b>1</b></span>
+        <span class="div"></span>
+        <span class="sst">tier-1 so far <b class="ok">2 / 2</b></span>
+        <span style="flex: 1"></span>
+        <span style="color: var(--text-3); font-size: 9.5px">▢ tick 2s ago</span>
+      </div>
+
+      <!-- lanes hybrid: gantt on top -->
+      <div class="split-tag">TIME · gantt by lane</div>
+      <div class="gantt">
+        <div class="gtime">
+          <span>14:02</span><span>14:08</span><span>14:14</span><span>14:20</span><span class="now">14:26 · now</span><span style="color: var(--text-3)">eta</span>
+        </div>
+        <div class="glane">
+          <div class="glbl">lane-1</div>
+          <div class="gtrack">
+            <div class="gblock merged" style="left: 0%; width: 28%;">slice-1</div>
+            <div class="gblock review" style="left: 30%; width: 28%;">slice-3</div>
+            <div class="gghost" style="left: 60%; width: 22%;">slice-6</div>
+            <div class="gnow-line" style="left: 68%;"></div>
+          </div>
+        </div>
+        <div class="glane">
+          <div class="glbl">lane-2</div>
+          <div class="gtrack">
+            <div class="gblock merged" style="left: 2%; width: 24%;">slice-0</div>
+            <div class="gblock work" style="left: 26%; width: 42%;">slice-4 ▶</div>
+            <div class="gghost" style="left: 70%; width: 22%;">slice-7</div>
+            <div class="gnow-line" style="left: 68%;"></div>
+          </div>
+        </div>
+        <div class="glane">
+          <div class="glbl">lane-3</div>
+          <div class="gtrack idle">
+            <div class="gblock merged" style="left: 0%; width: 50%;">slice-2</div>
+            <div class="gready" style="left: 52%; width: 16%;">⌁ READY</div>
+            <div class="gnow-line" style="left: 68%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- lanes hybrid: kanban now-state -->
+      <div class="split-tag" style="margin-top: 4px;">NOW · current state per lane</div>
+      <div class="split-row">
+        <div class="lcard review">
+          <div class="lh">
+            <span class="lname">lane-1</span>
+            <span class="pill review"><span class="dt"></span>REVIEW</span>
+          </div>
+          <div class="ttl"><span style="color: var(--c-accent)">slice-3</span> · Render config schema validator</div>
+          <div class="lmeters">
+            <div><div class="mt">DUR</div><div class="mv">1m48s</div><div class="bar"><div class="f warn" style="width: 30%;"></div></div></div>
+            <div><div class="mt">CTX</div><div class="mv">41%</div><div class="bar"><div class="f work" style="width: 41%;"></div></div></div>
+          </div>
+        </div>
+        <div class="lcard work">
+          <div class="lh">
+            <span class="lname">lane-2</span>
+            <span class="pill work"><span class="dt"></span>WORK</span>
+          </div>
+          <div class="ttl"><span style="color: var(--c-accent)">slice-4</span> · HTML renderer + mock-target snapshot</div>
+          <div class="lmeters">
+            <div><div class="mt">DUR</div><div class="mv">6m12s</div><div class="bar"><div class="f work" style="width: 68%;"></div></div></div>
+            <div><div class="mt">CTX</div><div class="mv warn">73%</div><div class="bar"><div class="f warn" style="width: 73%;"></div></div></div>
+          </div>
+        </div>
+        <div class="lcard idle">
+          <div class="lh">
+            <span class="lname">lane-3</span>
+            <span class="pill idle"><span class="dt"></span>IDLE · 2m14s</span>
+          </div>
+          <div class="idle-msg">⌁ READY · NEXT SLICE WILL LAND HERE</div>
+        </div>
+      </div>
+
+      <!-- queue strip -->
+      <div class="queue-strip">
+        <span style="color: var(--text-3); letter-spacing: 0.12em;">QUEUE</span>
+        <span class="qchip"><span class="id">slice-5</span>blocked on slice-4</span>
+        <span class="qchip ready"><span class="id">slice-6</span>ready → lane-1</span>
+        <span class="qchip ready"><span class="id">slice-7</span>ready → lane-2</span>
+        <span class="qchip"><span class="id">slice-8</span>blocked on slice-6</span>
+        <span style="flex: 1"></span>
+        <span style="color: var(--text-3)">3 lanes · 2 ready · 2 blocked · 1 idle</span>
+      </div>
+
+      <!-- slice cards (click to open drawer) -->
+      <div class="split-tag" style="margin-top: 4px;">SLICES · click for detail</div>
+      <div class="slist">
+
+        <div class="scard work-state" onclick="openDrawer('slice-4')">
+          <div class="row1">
+            <span class="sid">slice-4</span>
+            <span class="stt">Add HTML renderer with mock-target snapshot</span>
+            <span class="bdg afk">AFK</span>
+            <span class="bdg lane">lane-2</span>
+            <span class="spill work"><span class="pd"></span>WORK</span>
+          </div>
+          <div class="meters">
+            <div class="meter">
+              <div class="mhead"><span class="ml">DURATION · IN STATE</span><span class="mv">6m 12s <span style="color: var(--text-3)">/ ~9m</span></span></div>
+              <div class="mbar"><div class="fill work" style="width: 68%;"></div></div>
+            </div>
+            <div class="meter">
+              <div class="mhead"><span class="ml">CONTEXT WINDOW</span><span class="mv warn">73% <span style="color: var(--text-3)">· 146k / 200k</span></span></div>
+              <div class="mbar"><div class="fill warn" style="width: 73%;"></div></div>
+            </div>
+          </div>
+          <div class="stats">
+            <span class="s"><span class="l">COST</span><span class="v">$0.41</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">RETRY</span><span class="v warn">1 / 2</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">GATE</span><span class="v">typecheck ▶</span></span>
+            <span class="grow"></span>
+            <span class="s"><span class="l">SESSION</span><code>9b0c…ef13</code></span>
+            <span class="iconmini">⎘</span>
+          </div>
+          <div class="traverse">
+            <span class="st done">setup</span><span class="arr">→</span>
+            <span class="st curr">work <span class="retry">retry 1/2</span></span><span class="arr">→</span>
+            <span class="st">pr</span><span class="arr">→</span>
+            <span class="st">review</span><span class="arr">→</span>
+            <span class="st">merged</span>
+          </div>
+        </div>
+
+        <div class="scard review-state" onclick="openDrawer('slice-3')">
+          <div class="row1">
+            <span class="sid">slice-3</span>
+            <span class="stt">Render config schema validator</span>
+            <span class="bdg afk">AFK</span>
+            <span class="bdg lane">lane-1</span>
+            <span class="spill review"><span class="pd"></span>REVIEW</span>
+          </div>
+          <div class="meters">
+            <div class="meter">
+              <div class="mhead"><span class="ml">DURATION · IN STATE</span><span class="mv">1m 48s</span></div>
+              <div class="mbar"><div class="fill warn" style="width: 30%;"></div></div>
+            </div>
+            <div class="meter">
+              <div class="mhead"><span class="ml">CONTEXT WINDOW</span><span class="mv">41%</span></div>
+              <div class="mbar"><div class="fill work" style="width: 41%;"></div></div>
+            </div>
+          </div>
+          <div class="stats">
+            <span class="s"><span class="l">COST</span><span class="v">$0.28</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">PR</span><span class="v" style="color: var(--c-accent)">#142</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">REVIEWER</span><code>A2-fresh</code></span>
+            <span class="grow"></span>
+            <span class="iconmini">⎘</span>
+            <span class="iconmini">↗</span>
+          </div>
+        </div>
+
+        <div class="scard merged-state" onclick="openDrawer('slice-2')">
+          <div class="row1">
+            <span class="sid">slice-2</span>
+            <span class="stt">Config schema + golden tests</span>
+            <span class="bdg afk">AFK</span>
+            <span class="spill merged"><span class="pd"></span>MERGED</span>
+          </div>
+          <div class="stats">
+            <span class="s"><span class="l">COST</span><span class="v">$0.74</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">DURATION</span><span class="v">11m 42s</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">PR</span><span class="v" style="color: var(--text-2)">#141 ✓</span></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">TIER</span><span class="v">1</span></span>
+            <span class="grow"></span>
+            <span class="iconmini">📄</span>
+          </div>
+        </div>
+
+        <div class="scard blocked-state" onclick="openDrawer('slice-5')">
+          <div class="row1">
+            <span class="sid">slice-5</span>
+            <span class="stt">Eval harness integration</span>
+            <span class="bdg afk">AFK</span>
+            <span class="spill blocked">BLOCKED · waits on slice-4</span>
+          </div>
+          <div class="stats" style="opacity: 0.7">
+            <span class="s"><span class="l">DEPENDS</span><code>slice-3, slice-4</code></span>
+            <span class="sep">·</span>
+            <span class="s"><span class="l">TOUCHES</span><code>tests/eval/**</code></span>
+            <span class="grow"></span>
+            <span style="color: var(--text-3)">queued for next free lane</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ──────── SETTINGS ROUTE ──────── -->
+    <section class="route" id="route-settings">
+      <div class="stabs">
+        <div class="lnav">
+          <div class="nv active"><span class="ico">●</span><span>Project</span></div>
+          <div class="nv"><span class="ico">▤</span><span>Lanes</span></div>
+          <div class="nv"><span class="ico">▣</span><span>Gates</span></div>
+          <div class="nv"><span class="ico">◐</span><span>Account</span><span class="badge">multi</span></div>
+          <div class="nv"><span class="ico">⌁</span><span>Sync</span></div>
+          <div class="sep"></div>
+          <div class="nv"><span class="ico">▴</span><span>Health</span><span class="badge" style="background: rgba(52,211,153,0.15); color: var(--c-accent-2)">trends</span></div>
+          <div class="sep"></div>
+          <div class="nv"><span class="ico">⚙</span><span>Advanced</span></div>
+          <div class="nv" style="margin-top: 8px; color: var(--text-3);"><span class="ico">+</span><span>Add project…</span></div>
+        </div>
+
+        <div class="rpanel">
+          <div class="panel">
+            <div class="sh">PROJECT · inpolicy/web</div>
+            <div class="field">
+              <div class="fl">Repo slug<div class="desc">owner/name on GitHub. Used for <code>gh pr create</code> + issue publishing.</div></div>
+              <div class="fc"><input class="input wide" value="inpolicy/web"><span class="badgep ok">verified</span></div>
+            </div>
+            <div class="field">
+              <div class="fl">Base branch<div class="desc">Default target for PRs. Detected from git remote.</div></div>
+              <div class="fc"><input class="input short" value="main"></div>
+            </div>
+            <div class="field">
+              <div class="fl">Project root</div>
+              <div class="fc"><input class="input wide" value="/Users/yosifelessawi/Desktop/inpolicy/web"></div>
+            </div>
+            <div class="field">
+              <div class="fl">ADR folder</div>
+              <div class="fc"><input class="input" value="docs/adrs/"></div>
+            </div>
+            <div class="field">
+              <div class="fl">Lifetime tracking since<div class="desc">First slice JSONL event. Set automatically.</div></div>
+              <div class="fc"><span style="font-family: var(--mono); color: var(--text-1);">2026-03-14</span></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="sh">LANES &amp; SYNC · preview</div>
+            <div class="field">
+              <div class="fl">Default parallel lanes</div>
+              <div class="fc"><input class="slider" type="range" value="3" min="1" max="8"><span style="font-family: var(--mono); color: var(--c-accent); font-size: 13px; font-weight: 700;">3</span></div>
+            </div>
+            <div class="field">
+              <div class="fl">SSE heartbeat</div>
+              <div class="fc"><input class="input short" value="2"> <span style="color: var(--text-3); font-family: var(--mono); font-size: 11px;">seconds</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ════════════════ RIGHT RAIL ════════════════ -->
+  <aside class="cp-rail">
+    <div class="rail-seg">
+      <div class="rh"><span>SYNC</span><span style="color: var(--c-accent-2)">▢ 2s ago</span></div>
+      <div class="activity">
+        <div class="a"><span class="ts">14:23</span><span class="sid">slice-3</span> → review</div>
+        <div class="a"><span class="ts">14:21</span><span class="sid">slice-2</span> merged ✓</div>
+        <div class="a"><span class="ts">14:18</span>lane-3 idle</div>
+        <div class="a"><span class="ts">14:15</span><span class="sid">slice-4</span> → work (retry 1)</div>
+      </div>
+    </div>
+
+    <div class="rail-seg">
+      <div class="rh"><span>COST TIMELINE</span><span style="color: var(--c-accent)">▴</span></div>
+      <div class="rail-cost">
+        <div class="rail-row"><span class="l">today</span><span class="v">$4.21</span></div>
+        <div class="rail-row"><span class="l">this week</span><span class="v">$24.80</span></div>
+        <div class="rail-row"><span class="l">last 30d</span><span class="v">$118.42</span></div>
+        <div class="rail-row lifetime-row"><span class="l">lifetime</span><span class="v lifetime">$342.16</span></div>
+      </div>
+      <div class="rail-spark">
+        <i style="height: 18%"></i><i style="height: 32%"></i><i style="height: 24%"></i><i style="height: 38%"></i><i style="height: 60%"></i><i style="height: 28%"></i><i style="height: 44%"></i><i style="height: 70%"></i><i style="height: 52%"></i><i style="height: 36%"></i><i style="height: 48%"></i><i style="height: 76%"></i><i class="hi" style="height: 92%"></i><i class="hi" style="height: 64%"></i>
+      </div>
+      <div class="rail-row" style="margin-top: 6px;"><span class="l">tokens today</span><span class="v">9.2M</span></div>
+      <div class="rail-row"><span class="l">tokens · 30d</span><span class="v">218M</span></div>
+    </div>
+
+    <div class="rail-seg">
+      <div class="rh">SESSION QUOTA</div>
+      <div class="rail-row"><span class="l">used</span><span class="v">29%</span></div>
+      <div class="rail-bar"><div class="f ok" style="width: 29%"></div></div>
+      <div class="rail-reset">resets in 50m</div>
+    </div>
+
+    <div class="rail-seg">
+      <div class="rh">WEEKLY QUOTA</div>
+      <div class="rail-row"><span class="l">used</span><span class="v warn">84%</span></div>
+      <div class="rail-bar"><div class="f warn" style="width: 84%"></div></div>
+      <div class="rail-reset">resets in 5d 8h · est empty Thu 6pm</div>
+    </div>
+
+    <div class="rail-seg">
+      <div class="rh">THIS PROJECT</div>
+      <div class="rail-row"><span class="l">share of weekly</span><span class="v">62%</span></div>
+      <div class="rail-row"><span class="l">share of lifetime</span><span class="v">71%</span></div>
+    </div>
+  </aside>
+</div>
+
+<!-- ════════════════ DRAWER ════════════════ -->
+<div class="drawer-backdrop" id="drawerBd" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="dhd">
+    <div class="grow">
+      <span class="sid">slice-4</span>
+      <h2>HTML renderer with mock-target snapshot</h2>
+      <div class="meta">
+        <span class="spill work"><span class="pd"></span>WORK</span>
+        <span class="bdg afk">AFK</span>
+        <span class="bdg lane">lane-2</span>
+        <span>·</span>
+        <span>started 14:17:43 · 6m12s</span>
+      </div>
+    </div>
+    <span class="close" onclick="closeDrawer()">×</span>
+  </div>
+
+  <div class="dactions">
+    <span class="actbtn disabled" title="Slice is in WORK · resuming the session in a terminal would interrupt naml's run. HOLD first.">▶ OPEN IN TERMINAL</span>
+    <span class="actbtn ghost">⎘ copy session-id</span>
+    <span class="actbtn ghost">⎇ checkout branch</span>
+    <span class="actbtn ghost">↗ view PR (when ready)</span>
+    <span style="flex: 1"></span>
+    <span class="actbtn warn">⏸ HOLD &amp; UNLOCK TERMINAL</span>
+    <span class="actbtn danger">✕ MARK FAILED</span>
+    <span class="actbtn ghost">⏭ SKIP</span>
+  </div>
+
+  <div class="gate-note">
+    <span class="gico">⚠</span>
+    <div>
+      <strong>"Open in terminal" is locked while naml owns the session.</strong>
+      Resuming this slice's Claude session from a separate terminal would yank the
+      conversation out from under the lane worker and corrupt the run.
+      <div style="margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--text-2);">
+        LOCKED in: <code>setup · work · pr</code> · UNLOCKED in: <code>held · review · merged · failed · needs_human_review · abandoned</code>
+      </div>
+    </div>
+  </div>
+
+  <div class="dbody">
+    <div class="sect">
+      <div class="sh"><span>OVERVIEW</span><span style="color: var(--text-1);">all live data</span></div>
+      <div class="sb">
+        <div class="ogrid">
+          <div><div class="k">SESSION ID</div><div class="v"><code>9b0c-4a82-f3d8-ef13</code></div></div>
+          <div><div class="k">BRANCH</div><div class="v"><code>naml/slice-4-html-renderer</code></div></div>
+          <div><div class="k">DEPENDS ON</div><div class="v" style="color: var(--c-accent-2)">slice-2 ✓ · slice-3 ⏵</div></div>
+          <div><div class="k">PR</div><div class="v" style="color: var(--text-3)">not yet open</div></div>
+          <div><div class="k">COST · TOKENS</div><div class="v">$0.41 · 82k in / 14k out / 1.2M cache</div></div>
+          <div><div class="k">CONTEXT WINDOW</div><div class="v warn">73% · 146k / 200k</div></div>
+          <div><div class="k">RETRY · WORK STATE</div><div class="v warn">1 of 2</div></div>
+          <div><div class="k">DURATION · IN STATE</div><div class="v">6m 12s · ~9m budget</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <div class="sh"><span>ACCEPTANCE CRITERIA</span><span style="color: var(--text-1);">3 of 5 verified</span></div>
+      <div class="sb">
+        <div class="ac">
+          <div class="ac-item done"><span class="box">✓</span><span class="t">Renderer accepts the V2 config schema from <code>slice-3</code></span></div>
+          <div class="ac-item done"><span class="box">✓</span><span class="t">Output matches the mock-target snapshot in <code>artifacts/mock-output.html</code></span></div>
+          <div class="ac-item done"><span class="box">✓</span><span class="t">Uses <code>&lt;strong&gt;</code> tags, not <code>&lt;b&gt;</code></span></div>
+          <div class="ac-item run"><span class="box">▶</span><span class="t">All snapshot tests in <code>tests/render/snapshots/</code> pass — <span style="color: var(--c-warn)">typecheck failing</span></span></div>
+          <div class="ac-item"><span class="box"></span><span class="t">Renders in storybook under <code>render/HtmlRenderer</code></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <div class="sh"><span>STATE MACHINE · traversal</span><span style="color: var(--text-1);">live</span></div>
+      <div class="sb">
+        <div class="timeline">
+          <div class="tspine"></div>
+          <div class="tevent done">
+            <div class="head"><span class="nm">SETUP</span><span class="ts">14:17:43</span><span class="dur">+4s</span></div>
+            <div class="detail">Worktree provisioned · branch <code>naml/slice-4-html-renderer</code> created from main</div>
+          </div>
+          <div class="tevent done">
+            <div class="head"><span class="nm">WORK</span><span class="ts">14:17:47</span><span class="dur">4m 30s</span></div>
+            <div class="detail">Implementer A1 spawned · 11 turns · gates green up to typecheck</div>
+          </div>
+          <div class="tevent retry">
+            <div class="head"><span class="nm">WORK · RETRY 1/2</span><span class="ts">14:22:17</span><span class="dur">resume</span></div>
+            <div class="detail">typecheck failed · resume sent with stderr · A1 session re-entered</div>
+          </div>
+          <div class="tevent current">
+            <div class="head"><span class="nm">WORK</span><span class="ts">14:22:18</span><span class="dur" style="color: var(--c-accent)">running · 1m 41s</span></div>
+            <div class="detail">A1 reasoning about <code>renderer.ts</code> type mismatch · 3 turns since resume</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- floating hint -->
+<div class="hint">
+  <b>Interactive cockpit.</b> Click <kbd>Dashboard</kbd> / <kbd>Sprint</kbd> / <kbd>Settings</kbd> tabs in the header to switch routes. Click any slice card to open the drawer. <kbd>Esc</kbd> or click outside to close.
+</div>
+
+<script>
+  function route(name) {
+    document.querySelectorAll('.route').forEach(r => r.classList.remove('active'));
+    document.getElementById('route-' + name).classList.add('active');
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.route === name));
+  }
+  function openDrawer(sliceId) {
+    document.getElementById('drawer').classList.add('open');
+    document.getElementById('drawerBd').classList.add('open');
+  }
+  function closeDrawer() {
+    document.getElementById('drawer').classList.remove('open');
+    document.getElementById('drawerBd').classList.remove('open');
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawer();
+  });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q8 — Sync &amp; smoothness · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 16px; min-height: 0; background: var(--bg-0); }
+
+    /* ── data-flow diagram ── */
+    .flow {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px 16px;
+      display: grid;
+      grid-template-columns: 1fr 28px 1fr 28px 1fr 28px 1fr;
+      gap: 4px;
+      align-items: center;
+      font-family: var(--mono);
+    }
+    .flow .node {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .flow .node.io { border-color: var(--c-accent); background: rgba(56,189,248,0.06); }
+    .flow .node.bg { border-color: rgba(167,139,250,0.4); background: rgba(167,139,250,0.06); }
+    .flow .node.ui { border-color: var(--c-accent-2); background: rgba(52,211,153,0.06); }
+    .flow .node .nh {
+      font-size: 9px; letter-spacing: 0.14em; color: var(--text-3);
+      margin-bottom: 4px;
+    }
+    .flow .node .nt {
+      font-size: 11px; color: var(--text-0); font-weight: 600;
+    }
+    .flow .node .ns {
+      font-size: 9px; color: var(--text-2); margin-top: 3px;
+    }
+    .flow .arrow {
+      text-align: center;
+      color: var(--text-3);
+      font-size: 14px;
+      font-family: var(--mono);
+    }
+    .flow .arrow .lbl {
+      font-size: 8px; color: var(--c-accent); display: block; margin-bottom: 2px;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── transition timeline (frames) ── */
+    .timeline {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 12px;
+    }
+    .timeline .thd {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.14em;
+      margin-bottom: 10px;
+    }
+    .frames {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+    }
+    .frame {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px;
+      position: relative;
+    }
+    .frame .fhd {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); letter-spacing: 0.12em;
+      margin-bottom: 8px;
+      display: flex; justify-content: space-between;
+    }
+    .frame .fhd .t { color: var(--c-accent); }
+    .frame .mini-card {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 6px;
+      padding: 7px 8px;
+      font-size: 9.5px;
+      position: relative;
+      overflow: hidden;
+    }
+    .frame .mini-card::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+      background: var(--c-work);
+      transition: background 0.4s ease;
+    }
+    .frame .mini-card.review::before { background: var(--c-review); }
+    .frame .mini-card .ttl {
+      color: var(--text-0); font-family: var(--mono); font-size: 9.5px;
+    }
+    .frame .mini-card .pill {
+      display: inline-block;
+      padding: 1px 5px; border-radius: 999px;
+      font-family: var(--mono); font-size: 8.5px;
+      letter-spacing: 0.08em;
+      margin-top: 3px;
+    }
+    .frame .mini-card .pill.work { background: rgba(56,189,248,0.15); color: var(--c-work); }
+    .frame .mini-card .pill.review { background: rgba(251,191,36,0.18); color: var(--c-review); }
+    .frame .mini-card .pill .pd {
+      display: inline-block;
+      width: 4px; height: 4px; border-radius: 50%;
+      background: currentColor;
+      margin-right: 3px;
+      box-shadow: 0 0 4px currentColor;
+    }
+    .frame .desc {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-2);
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    /* ── sync dot states grid ── */
+    .syncs {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 12px;
+    }
+    .sync-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+      margin-top: 10px;
+    }
+    .sync-cell {
+      background: var(--bg-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .sync-cell .dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      display: inline-block;
+      margin-bottom: 8px;
+    }
+    .sync-cell.live .dot { background: var(--c-accent-2); box-shadow: 0 0 10px var(--c-accent-2); animation: pulse 2s ease-in-out infinite; }
+    .sync-cell.slow .dot { background: var(--c-warn); box-shadow: 0 0 10px var(--c-warn); }
+    .sync-cell.lost .dot { background: var(--c-failed); box-shadow: 0 0 10px var(--c-failed); animation: pulse 0.7s ease-in-out infinite; }
+    .sync-cell.connecting .dot { background: var(--text-2); box-shadow: 0 0 10px var(--text-2); animation: pulse 1.2s ease-in-out infinite; }
+    .sync-cell .sn {
+      font-family: var(--mono); font-size: 11px; color: var(--text-0); font-weight: 600;
+    }
+    .sync-cell .sd {
+      font-family: var(--mono); font-size: 9.5px; color: var(--text-2); margin-top: 4px;
+    }
+    .sync-cell .sw {
+      font-family: var(--mono); font-size: 8.5px; color: var(--text-3); margin-top: 6px;
+      letter-spacing: 0.1em;
+    }
+
+    /* ── smoothness rules ── */
+    .smooth {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 12px;
+    }
+    .smooth table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    .smooth th, .smooth td {
+      text-align: left; padding: 7px 10px;
+      border-bottom: 1px solid var(--border-soft);
+      vertical-align: top;
+    }
+    .smooth th {
+      font-family: var(--mono); font-size: 10px; color: var(--text-3);
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .smooth td:first-child { font-family: var(--mono); color: var(--text-0); font-weight: 600; white-space: nowrap; }
+    .smooth td:nth-child(2) { font-family: var(--mono); color: var(--c-accent); }
+    .smooth td:last-child { color: var(--text-1); }
+
+    .blockh {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--c-accent); letter-spacing: 0.14em;
+      margin: 14px 4px 8px;
+    }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 08 / Sync &amp; smoothness</div>
+      <h1>How does the cockpit stay synced with the run?</h1>
+      <div class="qsub">
+        Naml already writes state to JSON files (<code>state/slice-N.status.json</code>, <code>state/sprint.status.json</code>) atomically. The UI question is: how do we get those changes to the browser <em>fast</em>, with no flicker, and recover gracefully when sync drops?
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q7b-metrics-hybrid.html">← Q7b</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — SSE push driven by a file watcher on <code>.naml/sprints/*/state/</code>.</strong>
+      The Python server uses <code>watchdog</code> (FSEvents on macOS) to watch the state directory. When naml atomically rewrites a status.json, the server emits a Server-Sent Events message with the delta. The browser <code>EventSource</code> applies the patch and animates the affected card. No polling, no held connections beyond one SSE stream, latency &lt; 100ms from state file rewrite to pixel flip.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ──────── Option A: SSE + watchdog (RECOMMENDED) ──────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A — SSE + FILE WATCHER</div>
+        <h2>Push from disk · stream to browser · &lt; 100ms latency</h2>
+      </div>
+      <div class="option-preview">
+
+        <!-- DATA FLOW -->
+        <div class="blockh">DATA FLOW · disk → server → browser</div>
+        <div class="flow">
+          <div class="node io">
+            <div class="nh">NAML LANE</div>
+            <div class="nt">atomic write</div>
+            <div class="ns">state/slice-4.status.json</div>
+          </div>
+          <div class="arrow"><span class="lbl">fsevents</span>→</div>
+          <div class="node bg">
+            <div class="nh">SERVER · WATCHDOG</div>
+            <div class="nt">read &amp; diff</div>
+            <div class="ns">emit delta</div>
+          </div>
+          <div class="arrow"><span class="lbl">SSE event</span>→</div>
+          <div class="node bg">
+            <div class="nh">EVENTSOURCE</div>
+            <div class="nt">message</div>
+            <div class="ns">state-update</div>
+          </div>
+          <div class="arrow"><span class="lbl">patch DOM</span>→</div>
+          <div class="node ui">
+            <div class="nh">COCKPIT</div>
+            <div class="nt">animate flip</div>
+            <div class="ns">~80ms total</div>
+          </div>
+        </div>
+
+        <!-- SAMPLE SSE EVENT -->
+        <div class="blockh">SSE EVENT SHAPE · what the browser receives</div>
+        <div class="timeline" style="margin-top: 0; padding: 14px 18px;">
+<pre style="margin: 0; font-family: var(--mono); font-size: 11px; color: var(--text-1); line-height: 1.6;">event: state-update
+data: {
+  "kind": "slice",
+  "sprint": "2026-05-19-html-renderer",
+  "slice": "slice-4",
+  "from": "work",
+  "to": "pr",
+  "at": "2026-05-19T14:23:18.412Z",
+  "delta": {
+    "state": "pr",
+    "pr_url": "https://github.com/inpolicy/web/pull/142",
+    "ctx_pct": 73,
+    "cost_usd": 0.41,
+    "attempts": { "work": 1 }
+  }
+}</pre>
+        </div>
+
+        <!-- TRANSITION FRAMES -->
+        <div class="blockh">TRANSITION ANIMATION · slice-4 work → pr (~400ms total)</div>
+        <div class="frames">
+          <div class="frame">
+            <div class="fhd"><span>FRAME 1</span><span class="t">0ms</span></div>
+            <div class="mini-card">
+              <div class="ttl">slice-4 · HTML renderer</div>
+              <div class="pill work"><span class="pd pulse"></span>WORK</div>
+            </div>
+            <div class="desc">SSE event arrives. State machine pre-transition.</div>
+          </div>
+          <div class="frame">
+            <div class="fhd"><span>FRAME 2</span><span class="t">+0ms</span></div>
+            <div class="mini-card" style="background: rgba(56,189,248,0.05);">
+              <div class="ttl">slice-4 · HTML renderer</div>
+              <div class="pill work"><span class="pd"></span>WORK</div>
+            </div>
+            <div class="desc">Pulse fades. Card border glows briefly (acknowledge incoming event).</div>
+          </div>
+          <div class="frame">
+            <div class="fhd"><span>FRAME 3</span><span class="t">+200ms</span></div>
+            <div class="mini-card review" style="background: rgba(251,191,36,0.05);">
+              <div class="ttl">slice-4 · HTML renderer</div>
+              <div class="pill" style="background: linear-gradient(90deg, rgba(56,189,248,0.12), rgba(251,191,36,0.18)); color: var(--text-1);">
+                <span class="pd"></span>TRANSITIONING
+              </div>
+            </div>
+            <div class="desc">Color tweens cyan→amber. Stripe shifts. Pill label morphs.</div>
+          </div>
+          <div class="frame">
+            <div class="fhd"><span>FRAME 4</span><span class="t">+300ms</span></div>
+            <div class="mini-card review">
+              <div class="ttl">slice-4 · HTML renderer</div>
+              <div class="pill review"><span class="pd"></span>PR</div>
+            </div>
+            <div class="desc">Final color. PR pill rendered. Sub-stats refresh (PR #142 appears).</div>
+          </div>
+          <div class="frame">
+            <div class="fhd"><span>FRAME 5</span><span class="t">+400ms</span></div>
+            <div class="mini-card review">
+              <div class="ttl">slice-4 · HTML renderer</div>
+              <div class="pill review"><span class="pd pulse"></span>PR</div>
+            </div>
+            <div class="desc">New pulse begins on PR dot. Activity ticker prepends "14:23 slice-4 → pr".</div>
+          </div>
+        </div>
+
+        <!-- SYNC DOT STATES -->
+        <div class="syncs">
+          <div class="blockh" style="margin: 0 0 0 0;">SYNC DOT · the 4 states</div>
+          <div class="sync-grid">
+            <div class="sync-cell live">
+              <div class="dot"></div>
+              <div class="sn">LIVE</div>
+              <div class="sd">▢ Synced 2s ago</div>
+              <div class="sw">Steady pulse · 2s heartbeat</div>
+            </div>
+            <div class="sync-cell slow">
+              <div class="dot"></div>
+              <div class="sn">SLOW</div>
+              <div class="sd">▢ Synced 8s ago</div>
+              <div class="sw">No solid pulse · &gt; 5s since last event</div>
+            </div>
+            <div class="sync-cell lost">
+              <div class="dot"></div>
+              <div class="sn">LOST</div>
+              <div class="sd">⚠ Sync lost · retrying…</div>
+              <div class="sw">SSE disconnected · exp backoff</div>
+            </div>
+            <div class="sync-cell connecting">
+              <div class="dot"></div>
+              <div class="sn">CONNECTING</div>
+              <div class="sd">… reconnecting attempt 3/∞</div>
+              <div class="sw">SSE re-establishing</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SMOOTHNESS RULES -->
+        <div class="smooth">
+          <div class="blockh" style="margin: 0 0 8px 0;">SMOOTHNESS RULES · how transitions feel</div>
+          <table>
+            <tr><th>What changes</th><th>Animation</th><th>Why</th></tr>
+            <tr><td>State pill color</td><td>400ms tween</td><td>Long enough to perceive, short enough to feel responsive.</td></tr>
+            <tr><td>State pill text</td><td>cross-fade 200ms</td><td>Avoids label "popping" mid-transition.</td></tr>
+            <tr><td>Card border stripe</td><td>color tween 400ms</td><td>Same family as the pill so the change reads as one motion.</td></tr>
+            <tr><td>Pulse dot</td><td>stop → restart on new state</td><td>"Alive" signal restarts to mark new state begin.</td></tr>
+            <tr><td>Card re-order (work → pr)</td><td>FLIP 300ms ease-out</td><td>Moves smoothly to its new sort slot instead of jumping.</td></tr>
+            <tr><td>Activity ticker</td><td>slide-in from top 250ms</td><td>New event readable without losing context of older events.</td></tr>
+            <tr><td>Numeric counters</td><td>tween from old → new 600ms</td><td>$ + token deltas count up so the change is visible.</td></tr>
+            <tr><td>Sub-rail / progress bar</td><td>width tween 400ms ease</td><td>No jank when slice count flips 5/8 → 6/8.</td></tr>
+            <tr><td>Sync dot</td><td>color tween 200ms · pulse cadence varies</td><td>Live = calm; lost = urgent fast pulse.</td></tr>
+            <tr><td>Slow / lost state</td><td>desaturate timestamps 600ms</td><td>Cockpit dims when sync drops — visceral "not live" signal.</td></tr>
+          </table>
+        </div>
+
+      </div>
+      <div class="option-body">
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>&lt; 100ms latency from disk → DOM</li>
+              <li>No polling overhead — one open stream per tab</li>
+              <li>File watcher = natural fit for naml's atomic JSON writes</li>
+              <li>EventSource is browser-native, no JS dep</li>
+              <li>Reconnect logic is trivial (EventSource handles it)</li>
+              <li>SSE works over HTTP/1.1 + reverse proxies</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Needs <code>watchdog</code> Python dep (small)</li>
+              <li>FSEvents on macOS is reliable; on Linux/inotify there's a per-process watch limit</li>
+              <li>Multi-tab = multiple SSE streams (one per browser tab)</li>
+              <li>SSE is one-way; user actions still go through normal POST</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ──────── Option B: Long-poll with ETag ──────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B — LONG-POLL + ETAG</div>
+        <h2>Preserve current mechanism · stretch its cadence</h2>
+      </div>
+      <div class="option-preview">
+        <div class="blockh">DATA FLOW</div>
+        <div class="flow" style="grid-template-columns: 1fr 28px 1fr 28px 1fr;">
+          <div class="node io">
+            <div class="nh">NAML</div>
+            <div class="nt">writes state/*.json</div>
+          </div>
+          <div class="arrow"><span class="lbl">file</span>→</div>
+          <div class="node bg">
+            <div class="nh">SERVER</div>
+            <div class="nt">holds GET open</div>
+            <div class="ns">until mtime changes</div>
+          </div>
+          <div class="arrow"><span class="lbl">JSON resp</span>→</div>
+          <div class="node ui">
+            <div class="nh">BROWSER</div>
+            <div class="nt">apply &amp; re-poll</div>
+          </div>
+        </div>
+        <div class="smooth" style="margin-top: 12px;">
+          <table>
+            <tr><th>Aspect</th><th>Behaviour</th></tr>
+            <tr><td>Client</td><td>GET /state?if-none-match=&lt;etag&gt;</td></tr>
+            <tr><td>Server</td><td>Compares mtime; holds the response until something changes or timeout (~25s)</td></tr>
+            <tr><td>On change</td><td>Returns 200 + new etag + full state. Client re-issues GET.</td></tr>
+            <tr><td>Latency</td><td>~50-300ms from change to client (depends on watch granularity)</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Closest to what naml has today — preserved as the migration note ("ETag-based UI polling"). No new dep. But each tab holds one long-running connection, and the cadence is harder to keep tight without a watcher anyway. You end up implementing the same watchdog as A, just with a different transport.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Zero new deps</li>
+              <li>Closest to current behavior</li>
+              <li>Simple to reason about</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Server holds one connection per tab</li>
+              <li>Re-issuing GET creates micro-gaps</li>
+              <li>Cadence often ends up coarser than SSE</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ──────── Option C: WebSocket ──────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C — WEBSOCKET</div>
+        <h2>Full duplex · client actions over the same channel</h2>
+      </div>
+      <div class="option-preview">
+        <div class="blockh">DATA FLOW · duplex</div>
+        <div class="flow" style="grid-template-columns: 1fr 28px 1fr 28px 1fr;">
+          <div class="node io">
+            <div class="nh">NAML</div>
+            <div class="nt">writes state/*.json</div>
+          </div>
+          <div class="arrow"><span class="lbl">fsevents</span>→</div>
+          <div class="node bg">
+            <div class="nh">WS SERVER</div>
+            <div class="nt">push state-update</div>
+            <div class="ns">recv user actions</div>
+          </div>
+          <div class="arrow"><span class="lbl">⇄ frames</span></div>
+          <div class="node ui">
+            <div class="nh">BROWSER</div>
+            <div class="nt">render + send</div>
+          </div>
+        </div>
+        <div class="smooth" style="margin-top: 12px;">
+          <table>
+            <tr><th>Aspect</th><th>Behaviour</th></tr>
+            <tr><td>Channel</td><td>Single full-duplex socket</td></tr>
+            <tr><td>Server → client</td><td>state-update frames (same as SSE)</td></tr>
+            <tr><td>Client → server</td><td>user-action frames: run, merge, abort, intervene</td></tr>
+            <tr><td>Reconnect</td><td>Custom (need to write your own backoff)</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Unifies both directions on one socket. Real win is for client-initiated actions (Run/Merge buttons would go over WS instead of POST). But naml has only ~5 user-driven actions in the whole flow — overkill to use a duplex channel for that. Adds reconnect/backoff complexity that EventSource solves for free.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>One channel, both directions</li>
+              <li>Latency very low</li>
+              <li>Future-proof for richer interactivity</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Manual reconnect/backoff/heartbeat</li>
+              <li>Reverse-proxy quirks more common</li>
+              <li>Library dependency on server side</li>
+              <li>Overkill for naml's action surface</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a sync mechanism.</strong> Reply <code>A</code>, <code>B</code>, or <code>C</code>.
+    <div class="ask">
+      Side decisions on A:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Heartbeat cadence</strong> — server emits a <code>ping</code> SSE event every 2s even when nothing's changing. Drives the "Synced Ns ago" badge cheaply. Comfortable, or pull to 1s (snappier but more chatter)?</li>
+        <li><strong>Sync-lost threshold</strong> — go SLOW after 5s without ping, LOST after 15s without ping. OK, or tighter (3s / 10s)?</li>
+        <li><strong>Initial state on connect</strong> — server's first SSE event is a full snapshot (every sprint + slice). Subsequent events are deltas. So you can refresh the page mid-run and pick up exactly where you left off. Confirm that strategy.</li>
+        <li><strong>Catch-up on reconnect</strong> — when SSE reconnects, send a "since=&lt;last-event-id&gt;" so the server can stream missed events. Native to EventSource via <code>Last-Event-ID</code> header. Worth implementing right away, or skip until we hit a real reconnect race?</li>
+        <li><strong>Per-tab vs shared</strong> — one SSE stream per tab is the default. Open 4 tabs = 4 streams. Probably fine, but worth knowing.</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

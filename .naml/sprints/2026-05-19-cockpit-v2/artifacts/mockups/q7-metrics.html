@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Q7 — Metrics · naml cockpit</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .option-preview { padding: 0; min-height: 0; background: var(--bg-0); }
+    .surfaces {
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 200px 1fr;
+      gap: 12px;
+    }
+
+    /* ── right rail mini ── */
+    .rail {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 12px;
+      font-family: var(--mono); font-size: 10.5px;
+    }
+    .rail .tag {
+      font-size: 9px; letter-spacing: 0.14em; color: var(--text-3);
+    }
+    .rail .row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      font-size: 11px;
+    }
+    .rail .row .v { color: var(--text-0); font-weight: 600; }
+    .rail .row .v.warn { color: var(--c-warn); }
+    .rail .row .v.danger { color: var(--c-failed); }
+    .rail .row .v.ok { color: var(--c-accent-2); }
+    .rail .qbar {
+      height: 5px; background: var(--bg-3); border-radius: 3px; overflow: hidden;
+      position: relative; margin-top: 2px;
+    }
+    .rail .qbar .qf { position: absolute; inset: 0; }
+    .rail .qbar .qf.ok { background: var(--c-accent-2); }
+    .rail .qbar .qf.warn { background: var(--c-warn); }
+    .rail .qbar .qf.cost { background: linear-gradient(90deg, var(--c-accent), var(--c-accent-2)); }
+    .rail .reset {
+      font-size: 9px; color: var(--text-3);
+    }
+    .rail .seg { padding-top: 8px; border-top: 1px solid var(--border-soft); }
+    .rail .seg:first-child { padding-top: 0; border-top: none; }
+    .rail .spark {
+      height: 24px; display: flex; align-items: flex-end; gap: 2px;
+    }
+    .rail .spark i {
+      flex: 1; background: rgba(56,189,248,0.4); border-radius: 1px;
+    }
+    .rail .spark i.hi { background: var(--c-accent); }
+    .activity {
+      max-height: 84px; overflow: hidden;
+    }
+    .activity .a {
+      font-size: 10px; color: var(--text-2);
+      padding: 3px 0;
+      border-top: 1px solid var(--border-soft);
+    }
+    .activity .a:first-child { border-top: none; }
+    .activity .a .ts { color: var(--text-3); margin-right: 5px; }
+    .activity .a .ev { color: var(--text-1); }
+    .activity .a .ev .sid { color: var(--c-accent); }
+
+    /* ── main column (hero + sprint + slice) ── */
+    .col {
+      display: flex; flex-direction: column; gap: 12px;
+    }
+
+    /* hero */
+    .hero {
+      background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .hero .pname {
+      font-family: var(--mono); font-size: 12.5px;
+      color: var(--text-0); font-weight: 600;
+    }
+    .hero .pstate {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 2px 7px;
+      background: rgba(56,189,248,0.12);
+      color: var(--c-accent);
+      border: 1px solid rgba(56,189,248,0.3);
+      border-radius: 999px;
+      font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em;
+      margin-left: 6px;
+    }
+    .hero .pstate .pdot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--c-accent); box-shadow: 0 0 5px var(--c-accent);
+    }
+    .hero .stats {
+      display: grid; grid-template-columns: repeat(4, auto); gap: 14px;
+    }
+    .hero .stat { text-align: right; }
+    .hero .stat .v {
+      font-family: var(--mono); font-size: 15px;
+      color: var(--text-0); font-weight: 600;
+    }
+    .hero .stat .v.ok { color: var(--c-accent-2); }
+    .hero .stat .v.warn { color: var(--c-warn); }
+    .hero .stat .l {
+      font-family: var(--mono); font-size: 9px;
+      color: var(--text-3); letter-spacing: 0.12em; text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* sprint aux strip */
+    .saux {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; gap: 14px; align-items: center;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .saux .saxlbl { font-size: 9px; letter-spacing: 0.12em; color: var(--text-3); margin-right: 10px; }
+    .saux .sst { display: inline-flex; gap: 5px; align-items: baseline; }
+    .saux .sst b { color: var(--text-0); font-size: 11.5px; font-weight: 600; }
+    .saux .sst b.ok { color: var(--c-accent-2); }
+    .saux .sst b.warn { color: var(--c-warn); }
+    .saux .div { width: 1px; height: 14px; background: var(--border-soft); }
+
+    /* slice stats */
+    .sliceblk {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex; gap: 14px; align-items: center;
+      font-family: var(--mono); font-size: 10.5px;
+      color: var(--text-2);
+      flex-wrap: wrap;
+    }
+    .sliceblk .saxlbl { font-size: 9px; letter-spacing: 0.12em; color: var(--text-3); margin-right: 10px; }
+    .sliceblk b { color: var(--text-0); font-weight: 600; }
+    .sliceblk b.warn { color: var(--c-warn); }
+    .sliceblk b.ok { color: var(--c-accent-2); }
+    .sliceblk b.danger { color: var(--c-failed); }
+    .sliceblk .div { width: 1px; height: 14px; background: var(--border-soft); }
+
+    .label-strip {
+      font-family: var(--mono); font-size: 9.5px;
+      color: var(--text-3); letter-spacing: 0.14em;
+      padding: 4px 6px;
+      border-bottom: 1px dashed var(--border-soft);
+      margin-bottom: 2px;
+    }
+
+    /* legend panel for the recommended option */
+    .legend-table {
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-top: 18px;
+    }
+    .legend-table h3 {
+      margin: 0 0 12px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--c-accent);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .legend-table table { width: 100%; border-collapse: collapse; }
+    .legend-table th, .legend-table td {
+      text-align: left;
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 12px;
+      vertical-align: top;
+    }
+    .legend-table th {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--text-3); letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .legend-table td:first-child { color: var(--text-0); font-weight: 600; font-family: var(--mono); white-space: nowrap; }
+    .legend-table td:nth-child(2) { color: var(--c-accent); font-family: var(--mono); font-size: 11px; }
+    .legend-table td:last-child { color: var(--text-1); }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">Question 07 / Metrics</div>
+      <h1>What numbers earn screen space — and where?</h1>
+      <div class="qsub">
+        Four surfaces carry metrics: the always-visible <strong>right rail</strong>, the dashboard <strong>hero</strong>, the per-sprint <strong>aux strip</strong>, and the per-slice <strong>stats row</strong>. Each option below skews what those surfaces emphasize: a balanced cockpit, a cost-conscious skew, or a quality-conscious skew.
+      </div>
+    </div>
+    <nav class="qnav">
+      <a href="index.html">← all</a>
+      <a href="q6b-lane-hybrids.html">← Q6b</a>
+    </nav>
+  </header>
+
+  <div class="qrec">
+    <span class="qrec-tag">RECOMMENDATION</span>
+    <div class="qrec-body">
+      <strong>Option A — Balanced cockpit.</strong>
+      Right rail mirrors CodexBar (Session %, Weekly %, Today cost + tokens). Hero carries the four most decision-relevant project rollups: <em>Today $, Tier-1 hit %, Avg sprint duration, Sprints this week</em>. Sprint aux strip shows live <em>elapsed, ETA, cost, lanes, slices, last-tick</em>. Slice stats row carries the actionable in-flight signals: <em>cost, tokens, retry, last gate, session-id with action buttons</em>. Tier-1 hit rate gets prime real estate because it's the single best health indicator for the merge pipeline — when it drops, the whole sprint slows down.
+    </div>
+  </div>
+
+  <div class="options">
+
+    <!-- ─────────── Option A: balanced (RECOMMENDED) ─────────── -->
+    <article class="option recommended" style="grid-column: 1 / -1;">
+      <div class="badge-rec">RECOMMENDED</div>
+      <div class="option-head">
+        <div class="opt-tag">OPTION A — BALANCED</div>
+        <h2>Cost + Velocity + Quality, layered across surfaces</h2>
+      </div>
+      <div class="option-preview">
+        <div class="surfaces">
+          <!-- right rail -->
+          <div>
+            <div class="label-strip">RIGHT RAIL · always on</div>
+            <div class="rail">
+              <div class="seg">
+                <div class="tag">SESSION</div>
+                <div class="row"><span>used</span><span class="v">29%</span></div>
+                <div class="qbar"><div class="qf ok" style="width: 29%"></div></div>
+                <div class="reset">resets in 50m</div>
+              </div>
+              <div class="seg">
+                <div class="tag">WEEKLY</div>
+                <div class="row"><span>used</span><span class="v warn">84%</span></div>
+                <div class="qbar"><div class="qf warn" style="width: 84%"></div></div>
+                <div class="reset">resets in 5d 8h</div>
+              </div>
+              <div class="seg">
+                <div class="tag">COST · TODAY</div>
+                <div class="row"><span>$</span><span class="v">$4.21</span></div>
+                <div class="row"><span>tokens</span><span class="v">9.2M</span></div>
+                <div class="spark" style="margin-top: 6px;">
+                  <i style="height: 18%"></i><i style="height: 32%"></i><i style="height: 24%"></i><i style="height: 60%"></i><i class="hi" style="height: 88%"></i><i style="height: 44%"></i><i style="height: 72%"></i>
+                </div>
+              </div>
+              <div class="seg">
+                <div class="tag">ACTIVITY</div>
+                <div class="activity">
+                  <div class="a"><span class="ts">14:23</span><span class="ev"><span class="sid">slice-3</span> → review</span></div>
+                  <div class="a"><span class="ts">14:21</span><span class="ev"><span class="sid">slice-2</span> merged ✓</span></div>
+                  <div class="a"><span class="ts">14:18</span><span class="ev">lane-3 idle</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- main column: hero + aux + slice -->
+          <div class="col">
+
+            <div class="label-strip">DASHBOARD HERO</div>
+            <div class="hero">
+              <div>
+                <span class="pname">inpolicy/web</span>
+                <span class="pstate"><span class="pdot pulse"></span>ACTIVE</span>
+              </div>
+              <div class="stats">
+                <div class="stat"><div class="v">$4.21</div><div class="l">today</div></div>
+                <div class="stat"><div class="v ok">78%</div><div class="l">tier-1 hit</div></div>
+                <div class="stat"><div class="v">37m</div><div class="l">avg sprint</div></div>
+                <div class="stat"><div class="v">5</div><div class="l">sprints / wk</div></div>
+              </div>
+            </div>
+
+            <div class="label-strip">SPRINT AUX STRIP</div>
+            <div class="saux">
+              <span class="saxlbl">SPRINT</span>
+              <span class="sst">elapsed <b>21m 14s</b></span>
+              <span class="div"></span>
+              <span class="sst">eta <b class="ok">~14m</b></span>
+              <span class="div"></span>
+              <span class="sst">cost <b>$2.41</b></span>
+              <span class="div"></span>
+              <span class="sst">lanes <b>3 / 3</b></span>
+              <span class="div"></span>
+              <span class="sst">slices <b>5 / 8</b></span>
+              <span class="div"></span>
+              <span class="sst">tier-1 so far <b class="ok">2 / 2</b></span>
+              <span style="flex: 1"></span>
+              <span style="color: var(--text-3); font-size: 9.5px">▢ last tick 2s ago</span>
+            </div>
+
+            <div class="label-strip">SLICE STATS ROW (inside each slice card)</div>
+            <div class="sliceblk">
+              <span class="saxlbl">SLICE-4 · WORK</span>
+              <span>dur <b>6m12s</b></span>
+              <span class="div"></span>
+              <span>ctx <b class="warn">73%</b></span>
+              <span class="div"></span>
+              <span>cost <b>$0.41</b></span>
+              <span class="div"></span>
+              <span>tokens <b>82k · 14k · 1.2M</b></span>
+              <span class="div"></span>
+              <span>retry <b class="warn">1 / 2</b></span>
+              <span class="div"></span>
+              <span>gate <b>typecheck ▶</b></span>
+              <span style="flex: 1"></span>
+              <span>session <code>9b0c…ef13</code></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WHAT THIS COCKPIT TELLS YOU AT A GLANCE</span>
+            <ul>
+              <li>"How much am I burning today?" (rail + hero)</li>
+              <li>"Is my merge pipeline healthy?" (tier-1 % everywhere)</li>
+              <li>"How fast does this project ship?" (avg sprint duration)</li>
+              <li>"Is the current sprint on track?" (ETA, ctx %, retry)</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">WHAT IT DE-EMPHASIZES</span>
+            <ul>
+              <li>Per-slice review quality (collapsed into Tier-1)</li>
+              <li>Long-horizon cost trends (need to go to Settings)</li>
+              <li>DAG-width utilization (only visible by inference)</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="legend-table">
+          <h3>Full Metrics Taxonomy · recommended placements</h3>
+          <table>
+            <tr><th>Metric</th><th>Surface</th><th>Why it earns the space</th></tr>
+            <tr><td>Session %</td><td>right rail</td><td>Mirrors CodexBar. Tells you when an active slice is about to die mid-conversation.</td></tr>
+            <tr><td>Weekly %</td><td>right rail</td><td>Hard cap on the week. Crossing 80% = stop starting greenfield sprints.</td></tr>
+            <tr><td>Today $</td><td>rail + hero</td><td>Spending is the conversation with finance/yourself. Always visible.</td></tr>
+            <tr><td>Tokens today</td><td>rail</td><td>Companion to $; useful when you switch models.</td></tr>
+            <tr><td>Tier-1 hit %</td><td>hero</td><td>Single best merge-pipeline health signal. Drops → review/auto-fix is breaking.</td></tr>
+            <tr><td>Avg sprint duration</td><td>hero</td><td>Velocity trend at project level.</td></tr>
+            <tr><td>Sprints / week</td><td>hero</td><td>Throughput. Sanity check on whether you're shipping.</td></tr>
+            <tr><td>Sprint elapsed + ETA</td><td>aux strip</td><td>Are we on track now? ETA = (mean slice duration so far) × remaining slices.</td></tr>
+            <tr><td>Effective lanes</td><td>aux strip</td><td>3 / 3 = saturated. 2 / 3 = DAG or headroom is the bottleneck.</td></tr>
+            <tr><td>Slice retry n/cap</td><td>slice card</td><td>Per-state retry counter. Hidden when 0; loud when ≥ 1.</td></tr>
+            <tr><td>Context window %</td><td>slice card</td><td>Smoke alarm. Amber 70%, red 85%.</td></tr>
+            <tr><td>Last gate + verdict</td><td>slice card</td><td>"Why is this slice stuck?" answered without opening it.</td></tr>
+            <tr><td>Review verdict</td><td>slice card (review state)</td><td>LGTM / REQUEST_CHANGES / ABANDON. Drives next transition.</td></tr>
+            <tr><td>TTFP (time-to-first-PR)</td><td>post-sprint summary</td><td>Trend metric, not live. Watched over time, not per-run.</td></tr>
+            <tr><td>Mean review iterations</td><td>post-sprint summary</td><td>If &gt; 1.5 you have a reviewer-vs-implementer feedback problem.</td></tr>
+            <tr><td>Failed sprint %</td><td>Settings · health page</td><td>Long-horizon. If this rises, the project's config is off.</td></tr>
+          </table>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option B: cost-skew ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION B — COST-CONSCIOUS</div>
+        <h2>Burn rate is the headline · cost projection everywhere</h2>
+      </div>
+      <div class="option-preview">
+        <div class="surfaces">
+          <div>
+            <div class="label-strip">RIGHT RAIL</div>
+            <div class="rail">
+              <div class="seg">
+                <div class="tag">WEEKLY · 84% USED</div>
+                <div class="qbar"><div class="qf warn" style="width: 84%"></div></div>
+                <div class="row" style="margin-top: 4px;"><span>at burn rate</span><span class="v warn">empties Thu 6pm</span></div>
+              </div>
+              <div class="seg">
+                <div class="tag">TODAY · COST</div>
+                <div class="row"><span>spent</span><span class="v">$4.21</span></div>
+                <div class="row"><span>projected EOD</span><span class="v warn">$11.40</span></div>
+                <div class="spark" style="margin-top: 6px;">
+                  <i style="height: 18%"></i><i style="height: 32%"></i><i style="height: 24%"></i><i style="height: 60%"></i><i class="hi" style="height: 88%"></i><i style="height: 44%"></i><i style="height: 72%"></i>
+                </div>
+              </div>
+              <div class="seg">
+                <div class="tag">PER-SPRINT $</div>
+                <div class="row"><span>avg</span><span class="v">$1.84</span></div>
+                <div class="row"><span>p95</span><span class="v">$3.92</span></div>
+                <div class="row"><span>per merged PR</span><span class="v">$0.42</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="label-strip">HERO</div>
+            <div class="hero">
+              <div><span class="pname">inpolicy/web</span><span class="pstate"><span class="pdot pulse"></span>ACTIVE</span></div>
+              <div class="stats">
+                <div class="stat"><div class="v">$4.21</div><div class="l">today</div></div>
+                <div class="stat"><div class="v warn">$11.40</div><div class="l">proj EOD</div></div>
+                <div class="stat"><div class="v">$1.84</div><div class="l">$ / sprint</div></div>
+                <div class="stat"><div class="v">$0.42</div><div class="l">$ / merged PR</div></div>
+              </div>
+            </div>
+            <div class="label-strip">SPRINT AUX</div>
+            <div class="saux">
+              <span class="saxlbl">SPRINT</span>
+              <span class="sst">cost <b>$2.41</b></span>
+              <span class="div"></span>
+              <span class="sst">proj total <b class="warn">$3.92</b></span>
+              <span class="div"></span>
+              <span class="sst">$/slice avg <b>$0.48</b></span>
+              <span class="div"></span>
+              <span class="sst">tokens <b>2.1M</b></span>
+              <span class="div"></span>
+              <span class="sst">elapsed <b>21m</b></span>
+              <span class="div"></span>
+              <span class="sst">eta <b>~14m</b></span>
+            </div>
+            <div class="label-strip">SLICE STATS</div>
+            <div class="sliceblk">
+              <span class="saxlbl">SLICE-4 · WORK</span>
+              <span>cost so far <b>$0.41</b></span>
+              <span class="div"></span>
+              <span>proj total <b class="warn">$0.78</b></span>
+              <span class="div"></span>
+              <span>tokens <b>1.2M cached · 14k out</b></span>
+              <span class="div"></span>
+              <span>ctx <b class="warn">73%</b></span>
+              <span class="div"></span>
+              <span>retry <b>1/2</b></span>
+              <span class="div"></span>
+              <span>weekly impact <b class="warn">+0.4%</b></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Every surface answers "what is this costing me right now and projected?". Weekly quota gets a projected-empty-at timestamp. Per-slice cost projects forward. Health metrics (tier-1, review verdict) get demoted to post-sprint summary.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Burn rate is impossible to miss</li>
+              <li>Weekly-quota projection is actionable</li>
+              <li>Per-PR cost lets you compare ROI</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Quality signals (Tier-1, retry) recede</li>
+              <li>Stress-inducing during high-burn days</li>
+              <li>Projections drift if usage isn't linear</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ─────────── Option C: quality-skew ─────────── -->
+    <article class="option" style="grid-column: 1 / -1;">
+      <div class="option-head">
+        <div class="opt-tag">OPTION C — QUALITY-CONSCIOUS</div>
+        <h2>Health of the pipeline is the headline · retry/review/Tier-1 everywhere</h2>
+      </div>
+      <div class="option-preview">
+        <div class="surfaces">
+          <div>
+            <div class="label-strip">RIGHT RAIL</div>
+            <div class="rail">
+              <div class="seg">
+                <div class="tag">TIER-1 HIT · TODAY</div>
+                <div class="row"><span>%</span><span class="v ok">78%</span></div>
+                <div class="qbar"><div class="qf ok" style="width: 78%"></div></div>
+                <div class="row" style="margin-top: 4px;"><span>7-day trend</span><span class="v">+4 pp ↗</span></div>
+              </div>
+              <div class="seg">
+                <div class="tag">REVIEW · LGTM RATE</div>
+                <div class="row"><span>first-pass LGTM</span><span class="v ok">82%</span></div>
+                <div class="row"><span>mean iters</span><span class="v">1.2</span></div>
+              </div>
+              <div class="seg">
+                <div class="tag">FAILED SLICES · 7d</div>
+                <div class="row"><span>count</span><span class="v warn">3</span></div>
+                <div class="row"><span>rate</span><span class="v">5.6%</span></div>
+              </div>
+              <div class="seg">
+                <div class="tag">CTX EXHAUSTION RATE</div>
+                <div class="row"><span>slices &gt;85%</span><span class="v warn">12%</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="col">
+            <div class="label-strip">HERO</div>
+            <div class="hero">
+              <div><span class="pname">inpolicy/web</span><span class="pstate"><span class="pdot pulse"></span>ACTIVE</span></div>
+              <div class="stats">
+                <div class="stat"><div class="v ok">78%</div><div class="l">tier-1 hit</div></div>
+                <div class="stat"><div class="v ok">82%</div><div class="l">LGTM 1st pass</div></div>
+                <div class="stat"><div class="v warn">5.6%</div><div class="l">slice fail rate</div></div>
+                <div class="stat"><div class="v">1.2</div><div class="l">review iters</div></div>
+              </div>
+            </div>
+            <div class="label-strip">SPRINT AUX</div>
+            <div class="saux">
+              <span class="saxlbl">SPRINT</span>
+              <span class="sst">slices <b>5 / 8</b></span>
+              <span class="div"></span>
+              <span class="sst">retries <b>1</b></span>
+              <span class="div"></span>
+              <span class="sst">LGTM <b class="ok">2 / 2</b></span>
+              <span class="div"></span>
+              <span class="sst">gate fails <b>0</b></span>
+              <span class="div"></span>
+              <span class="sst">tier-1 so far <b class="ok">2 / 2</b></span>
+              <span class="div"></span>
+              <span class="sst">elapsed <b>21m</b></span>
+            </div>
+            <div class="label-strip">SLICE STATS</div>
+            <div class="sliceblk">
+              <span class="saxlbl">SLICE-4 · WORK</span>
+              <span>state-retries <b class="warn">1/2</b></span>
+              <span class="div"></span>
+              <span>gate <b class="danger">typecheck ✗</b></span>
+              <span class="div"></span>
+              <span>last error <b>type mismatch in renderer.ts</b></span>
+              <span class="div"></span>
+              <span>ctx <b class="warn">73%</b></span>
+              <span class="div"></span>
+              <span>verdict <b class="ok">LGTM (pending)</b></span>
+              <span class="div"></span>
+              <span>cost <b>$0.41</b></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="option-body">
+        <p class="why">Pipeline health is the conversation. Tier-1 hit rate, LGTM rate, slice fail rate, review iterations rule the chrome. Cost recedes to a single line in the slice stats. Best when you're tuning the system itself (skills, ADRs, gate config) rather than shipping features.</p>
+        <div class="prons">
+          <div class="pro">
+            <span class="lbl">WINS</span>
+            <ul>
+              <li>Reviewer + implementer feedback loops visible</li>
+              <li>Tier-1 trend is front-and-center</li>
+              <li>Gate failures named (not just counted)</li>
+            </ul>
+          </div>
+          <div class="con">
+            <span class="lbl">COSTS</span>
+            <ul>
+              <li>Easy to blow weekly quota un-noticed</li>
+              <li>Numbers are mostly post-event ratios (not live)</li>
+              <li>Stress signal during a failure cascade</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer class="qfoot">
+    <strong>Pick a metrics skew.</strong> Reply <code>A</code>, <code>B</code>, or <code>C</code>. Or a hybrid, e.g. "A for the rail, B for the hero".
+    <div class="ask">
+      Decisions inside whichever you pick:
+      <ul style="margin: 6px 0 0; padding-left: 20px;">
+        <li><strong>Tier-1 hit-rate window</strong> — last 7 days, last 30 sprints, or all-time? My pick: 7 days (responsive to recent regressions).</li>
+        <li><strong>Cost-projection method</strong> — linear extrapolation from current burn (simple), or "remaining slices × p50 per-slice cost" (smarter)? Default to linear until history.</li>
+        <li><strong>Per-sprint summary metrics</strong> after merge — which to log? I'd capture: total cost, total duration, tier-1 hit, retry count, LGTM rate, mean ctx peak, TTFP. So we can graph trends in Settings &gt; Health.</li>
+        <li><strong>Anything I'm missing?</strong> One signal I'm <em>not</em> tracking yet: <code>review/implementer disagreement rate</code> — when the reviewer asks for changes and the implementer's fix gets a fresh LGTM. If that disagreement is high, you have prompt drift between the two roles. Worth surfacing?</li>
+      </ul>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,148 @@
+# Pre-baked sprint package — built from the /grill-me V2 cockpit session
+# on 2026-05-19. Will be consumed by naml once Phase 5 lands and the V2
+# orchestrator is stable enough to dogfood on its own codebase.
+#
+# Reference: artifacts/spec.md captures every design decision (Q1–Q10
+# of the grilling session) and is loaded at the top of every slice prompt.
+
+[sprint]
+id          = "2026-05-19-cockpit-v2"
+title       = "naml V2 cockpit — web UI + live telemetry pipeline"
+target_repo = "YosifElessawi/naml"
+base_branch = "main"
+
+[meta]
+parent_sprint = ""
+kind          = "greenfield"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# FOUNDATION
+# ─────────────────────────────────────────────────────────────────────
+
+[[slices]]
+id         = "slice-1"
+title      = "Web server scaffold + static asset pipeline"
+type       = "AFK"
+depends_on = []
+touches    = ["web/**", "naml/server.py", "naml/cli.py", "pyproject.toml"]
+prompt     = "slices/slice-1.md"
+
+[[slices]]
+id         = "slice-2"
+title      = "Cockpit shell: header + right rail + main-pane routing + design tokens"
+type       = "AFK"
+depends_on = ["slice-1"]
+touches    = ["web/src/shell/**", "web/src/styles/tokens.css", "web/src/routes.ts", "web/src/main.tsx"]
+prompt     = "slices/slice-2.md"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# UI VIEWS · static dummy data first; live wiring in slice-13
+# ─────────────────────────────────────────────────────────────────────
+
+[[slices]]
+id         = "slice-3"
+title      = "Dashboard view: hero card + sprint timeline + feedback inbox sidecar"
+type       = "AFK"
+depends_on = ["slice-2"]
+touches    = ["web/src/views/Dashboard/**"]
+prompt     = "slices/slice-3.md"
+
+[[slices]]
+id         = "slice-4"
+title      = "Sprint state stepper + aux strip"
+type       = "AFK"
+depends_on = ["slice-2"]
+touches    = ["web/src/views/Sprint/Stepper/**", "web/src/views/Sprint/AuxStrip/**"]
+prompt     = "slices/slice-4.md"
+
+[[slices]]
+id         = "slice-5"
+title      = "Lane layout hybrid: gantt + kanban current state + queue strip"
+type       = "AFK"
+depends_on = ["slice-4"]
+touches    = ["web/src/views/Sprint/Lanes/**"]
+prompt     = "slices/slice-5.md"
+
+[[slices]]
+id         = "slice-6"
+title      = "Slice cards: dense telemetry, all state variants"
+type       = "AFK"
+depends_on = ["slice-5"]
+touches    = ["web/src/components/SliceCard/**"]
+prompt     = "slices/slice-6.md"
+
+[[slices]]
+id         = "slice-7"
+title      = "Slice detail drawer + Open-in-terminal gating"
+type       = "AFK"
+depends_on = ["slice-6"]
+touches    = ["web/src/components/SliceDrawer/**"]
+prompt     = "slices/slice-7.md"
+
+[[slices]]
+id         = "slice-8"
+title      = "Settings tabbed page + Health page with trend graphs"
+type       = "AFK"
+depends_on = ["slice-2"]
+touches    = ["web/src/views/Settings/**", "web/src/views/Health/**"]
+prompt     = "slices/slice-8.md"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# BACKEND TELEMETRY PIPELINE · independent of UI views, can run in parallel
+# ─────────────────────────────────────────────────────────────────────
+
+[[slices]]
+id         = "slice-9"
+title      = "Token JSONL emitter: lane spawns Claude with stream-json, parses usage"
+type       = "AFK"
+depends_on = []
+touches    = ["naml/lane.py", "naml/claude.py", "naml/state.py"]
+prompt     = "slices/slice-9.md"
+
+[[slices]]
+id         = "slice-10"
+title      = "In-memory aggregator + file watcher + cold-start replay"
+type       = "AFK"
+depends_on = ["slice-9"]
+touches    = ["naml/aggregator.py", "naml/watcher.py", "naml/server.py", "pyproject.toml"]
+prompt     = "slices/slice-10.md"
+
+[[slices]]
+id         = "slice-11"
+title      = "SSE endpoint + state-update events + EventSource client"
+type       = "AFK"
+depends_on = ["slice-10", "slice-2"]
+touches    = ["naml/server.py", "web/src/sync/EventSource.ts", "web/src/store/**"]
+prompt     = "slices/slice-11.md"
+
+[[slices]]
+id         = "slice-12"
+title      = "metric-tick events + cost timeline rollups (today/week/30d/lifetime)"
+type       = "AFK"
+depends_on = ["slice-11"]
+touches    = ["naml/aggregator.py", "naml/server.py", "web/src/store/metrics.ts"]
+prompt     = "slices/slice-12.md"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# WIRE-UP + POLISH
+# ─────────────────────────────────────────────────────────────────────
+
+[[slices]]
+id         = "slice-13"
+title      = "Wire UI to live data + smoothness animations + 4 sync-dot states"
+type       = "AFK"
+depends_on = ["slice-3", "slice-4", "slice-5", "slice-6", "slice-7", "slice-8", "slice-12"]
+touches    = ["web/src/views/**", "web/src/components/**", "web/src/styles/animations.css"]
+prompt     = "slices/slice-13.md"
+
+[[slices]]
+id         = "slice-14"
+title      = "Held slice state + HOLD intervention + drawer gating polish"
+type       = "AFK"
+depends_on = ["slice-7", "slice-13"]
+touches    = ["naml/states.py", "naml/lane.py", "naml/state.py", "web/src/components/SliceDrawer/**", "tests/**"]
+prompt     = "slices/slice-14.md"

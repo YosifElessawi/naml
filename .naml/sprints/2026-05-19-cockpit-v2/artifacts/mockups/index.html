@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>naml cockpit — design questions</title>
+  <link rel="stylesheet" href="cockpit.css">
+  <style>
+    .qlist { display: grid; gap: 10px; margin-top: 18px; }
+    .qcard {
+      display: flex; gap: 16px; align-items: center;
+      padding: 14px 18px;
+      background: var(--bg-1);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--r-md);
+      color: var(--text-1);
+      transition: border-color 0.15s, transform 0.15s;
+    }
+    .qcard:hover { border-color: var(--c-accent); transform: translateX(2px); }
+    .qcard .qn { font-family: var(--mono); color: var(--c-accent); font-size: 11px; width: 50px; }
+    .qcard .qt { flex: 1; color: var(--text-0); font-weight: 500; }
+    .qcard .qstatus {
+      font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+      padding: 3px 8px; border-radius: 4px;
+    }
+    .qcard .qstatus.open { background: rgba(56,189,248,0.12); color: var(--c-accent); }
+    .qcard .qstatus.todo { background: var(--bg-2); color: var(--text-3); border: 1px solid var(--border-soft); }
+    .intro { color: var(--text-1); max-width: 760px; }
+    .intro code { background: var(--bg-2); padding: 1px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<div class="qpage">
+
+  <header class="qheader">
+    <div>
+      <div class="qnum">naml · V2 cockpit design</div>
+      <h1>One question, one mockup, one decision.</h1>
+      <div class="qsub">
+        Each link below is a single design decision with 2–3 visual options side-by-side and a recommendation. Pick one per question; the next question builds on what you chose.
+      </div>
+    </div>
+  </header>
+
+  <div class="intro">
+    <p>Working surface: <code>localhost:8765</code>. Refresh after I drop new questions.</p>
+  </div>
+
+  <div class="qlist">
+
+    <a href="q1-shell.html" class="qcard">
+      <span class="qn">Q1</span>
+      <span class="qt">Shell &amp; information architecture — where does telemetry live?</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q2-header.html" class="qcard">
+      <span class="qn">Q2</span>
+      <span class="qt">Header — what stays pinned to the top?</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q3-dashboard.html" class="qcard">
+      <span class="qn">Q3</span>
+      <span class="qt">Dashboard — project state card &amp; sprint list</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q4-sprint-state.html" class="qcard">
+      <span class="qn">Q4</span>
+      <span class="qt">Sprint state visualization — how do we show the state machine?</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q5-slice-card.html" class="qcard">
+      <span class="qn">Q5</span>
+      <span class="qt">Slice cards — duration, cost, retries, context window</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q6-lanes.html" class="qcard">
+      <span class="qn">Q6</span>
+      <span class="qt">Lane layout — vertical/horizontal/grid? (superseded by Q6b)</span>
+      <span class="qstatus open" style="background: var(--bg-2); color: var(--text-3)">→ Q6b</span>
+    </a>
+
+    <a href="q6b-lane-hybrids.html" class="qcard">
+      <span class="qn">Q6b</span>
+      <span class="qt">Lane layout hybrids — gantt + lane utilization wins</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">H2 · DONE</span>
+    </a>
+
+    <a href="q7-metrics.html" class="qcard">
+      <span class="qn">Q7</span>
+      <span class="qt">Metrics &amp; quotas — three skews (superseded by Q7b)</span>
+      <span class="qstatus open" style="background: var(--bg-2); color: var(--text-3)">→ Q7b</span>
+    </a>
+
+    <a href="q7b-metrics-hybrid.html" class="qcard">
+      <span class="qn">Q7b</span>
+      <span class="qt">Metrics hybrid — cost timeline headline + all health metrics</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">HYBRID · DONE</span>
+    </a>
+
+    <a href="q8-sync.html" class="qcard">
+      <span class="qn">Q8</span>
+      <span class="qt">Sync &amp; smoothness — state transport (SSE)</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q8b-metrics-sync.html" class="qcard">
+      <span class="qn">Q8b</span>
+      <span class="qt">Metrics sync architecture — JSONL + in-memory aggregator (no DB)</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">ARCH · DONE</span>
+    </a>
+
+    <a href="q9-settings.html" class="qcard">
+      <span class="qn">Q9</span>
+      <span class="qt">Settings layout — single page, tabs, or wizard?</span>
+      <span class="qstatus open" style="background: rgba(52,211,153,0.12); color: var(--c-accent-2)">A · DONE</span>
+    </a>
+
+    <a href="q10-slice-detail.html" class="qcard">
+      <span class="qn">Q10</span>
+      <span class="qt">Slice detail drawer — full traversal timeline view</span>
+      <span class="qstatus open">OPEN</span>
+    </a>
+
+  </div>
+
+</div>
+</body>
+</html>

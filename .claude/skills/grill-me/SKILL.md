@@ -1,12 +1,12 @@
 ---
 name: grill-me
-description: Multi-phase conversational design session that turns an idea into a sprint package. Routes through intent → architecture → design → slicing → acceptance criteria. Reads docs/CONTEXT.md, docs/GLOSSARY.md, docs/adrs/ for project context. Streams slice files to disk as each converges. Run before /compose-sprint.
+description: Multi-phase conversational design session that turns an idea into a sprint package. Routes through intent → architecture → design → slicing → acceptance criteria. Spins up a localhost visual scratchpad (HTML mockups + mermaid diagrams) so every architectural / UI decision is grounded in a visual the user can actually look at. Reads docs/CONTEXT.md, docs/GLOSSARY.md, docs/adrs/ for project context. Streams slice files to disk as each converges. Run before /compose-sprint.
 disable-model-invocation: true
 ---
 
 # Grill Me
 
-A focused, phase-routed grilling session that produces a sprint draft. Adapts depth to sprint size automatically.
+A focused, phase-routed grilling session that produces a sprint draft. Adapts depth to sprint size automatically. **Always grounds decisions in visuals served from a local HTTP server** — HTML mockups for UI, mermaid diagrams for architecture, side-by-side option comparisons with a recommended pick badged.
 
 ## Interaction style (read first)
 
@@ -29,6 +29,102 @@ Example:
 If the user has clearly already decided and stated their preference, skip the recommendation and just confirm — don't manufacture fake alternatives. Recommendations are for the moments where the user would otherwise have to think from scratch.
 
 Only ask one question (or one tight cluster) per turn. Wait for the answer before moving on.
+
+## Visual scratchpad (set up once at session start)
+
+Every grilling session produces visual artifacts the user can open in a browser. **This is not optional.** Verbal descriptions don't survive a multi-question session; HTML mockups do, and they double as the design spec the implementer agents will reference.
+
+### Where the scratchpad lives
+
+```
+<project-root>/.naml/scratch/grill-<sprint-slug>/mockups/
+  cockpit.css         ← shared design tokens (created once, reused per question)
+  index.html          ← landing page linking to every question + decision status
+  q1-<topic>.html     ← one HTML per question with 2–3 visual options
+  q2-<topic>.html
+  …
+```
+
+`.naml/scratch/` is naml's working area (gitignored). At `/compose-sprint` time, only the mockups files referenced by slices migrate to `.naml/sprints/<id>/artifacts/mockups/`. The scratch dir is then safe to delete.
+
+If the project doesn't have a `.naml/` directory yet (skill is being used outside naml's flow), fall back to `/tmp/grill-<sprint-slug>/mockups/`.
+
+### Start the server (early, before Phase 1)
+
+Run in the background:
+
+```bash
+cd <scratchpath> && python3 -m http.server 8765
+```
+
+Use `run_in_background: true`. Tell the user the URL once:
+
+> Visual scratchpad live at **http://localhost:8765**. I'll drop one HTML per decision; refresh after each.
+
+If port 8765 is taken, pick the next free port (8766, 8767, …) and tell the user.
+
+### Bootstrap `cockpit.css` (first question only)
+
+If `cockpit.css` doesn't exist in the scratch dir yet, write it with these design tokens (dark cockpit aesthetic — sharp, monospace + sans mix, state-machine color palette):
+
+```css
+:root {
+  --bg-0: #0a0d12; --bg-1: #0f131a; --bg-2: #151b24; --bg-3: #1c2330;
+  --border: #2a3342; --border-soft: #1f2733;
+  --text-0: #e7ecf3; --text-1: #b9c2cf; --text-2: #7c8696; --text-3: #4d5666;
+  /* state colors */
+  --c-work: #38bdf8; --c-pr: #a78bfa; --c-review: #fbbf24;
+  --c-merged: #34d399; --c-failed: #f87171; --c-blocked: #94a3b8;
+  --c-accent: #38bdf8; --c-accent-2: #34d399;
+  --c-warn: #fbbf24; --c-danger: #f87171;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --sans: -apple-system, "Inter", system-ui, sans-serif;
+}
+body { background: var(--bg-0); color: var(--text-0); font-family: var(--sans); }
+```
+
+Extend it as needed per question, but keep the token list canonical. For naml's own design work, copy `~/Desktop/Naml/mockups/cockpit.css` as the starter — it's the most complete version of this stylesheet.
+
+### Question-page anatomy
+
+Every `q<N>-<topic>.html` follows the same shape (consistency is what makes the user able to navigate at speed):
+
+1. **Page header** — `Question NN / <surface>` tag + the question in plain English + 1-2 sentence framing.
+2. **Recommendation banner** — your concrete recommendation up front, badged in cyan.
+3. **2–3 option cards side by side**, each with:
+   - **Option tag** (`OPTION A`, etc.) + short title
+   - **Mini-mockup or diagram** showing the option visually (HTML/CSS for UI; inline SVG or mermaid for architecture; ASCII-style for terminal/CLI)
+   - **Why** paragraph — what this option does well
+   - **Wins / Costs** two-column ledger
+   - The recommended option gets a `RECOMMENDED` badge + cyan border-glow
+4. **Footer with side decisions** — micro-questions the user should weigh in on alongside the main pick.
+5. **Nav** — `← all questions` link to `index.html`, `← previous Q` link.
+
+### Mermaid diagrams for architecture / state
+
+For architecture questions, embed mermaid diagrams inside the option mini-mockups. Either inline SVG (if you're comfortable producing it) or via mermaid.js loaded from a CDN — but localhost may not have internet, so inline SVG is the safer default. The mockups in `~/Desktop/Naml/mockups/q4-sprint-state.html` and `q8-sync.html` show how to draw state machines + data flow as inline SVG without any library dependency.
+
+### Index page (`index.html`)
+
+A simple linked list of every question with status:
+
+```
+Q1 — Shell & information architecture     A · DONE
+Q2 — Header                                A · DONE
+Q3 — Dashboard layout                      OPEN
+Q4 — Sprint state visualization            QUEUED
+…
+```
+
+Update it after each question is answered (mark `OPEN → A · DONE`). This gives the user a one-glance progress map and lets them jump back to any question to revisit.
+
+### Iteration: a question can fail
+
+If the user pushes back on all options ("I don't like any of these"), don't keep arguing. Spawn a `q<N>b-<topic>.html` with new hybrid options drawn from their feedback. The Q6 → Q6b and Q7 → Q7b pattern is the canonical example — original question file stays for context, new file supersedes it. Update `index.html` to mark the old as `→ Q<N>b`.
+
+### Final assembly mockup (optional, end of session)
+
+After all decisions are locked, optionally produce `cockpit-final.html` (or `<feature>-final.html`) that stitches every chosen option into one live, interactive page. This is the artifact the implementer slices will reference as ground truth. Worth it for sprints that touch multiple UI surfaces; skip for backend-only sprints.
 
 ## Process
 
@@ -81,19 +177,27 @@ Grill on:
 - **Tradeoffs the user is making** — name 2-3 explicitly.
 - **New architectural decisions** — anything that should become a new ADR? If yes, draft it (don't write the file yet — that happens in compose-sprint).
 
+**Use the visual scratchpad for any decision with a graph shape.** Data flow, state machines, message protocols, deployment topologies — produce an `q<N>-<topic>.html` page with the diagram(s) inline (SVG). When comparing approaches (e.g. polling vs SSE vs WebSocket), each option gets its own mini-diagram in the option card. Don't hand-wave architecture in chat when 30 lines of SVG can show it.
+
 This phase is conversational and uses the recommendation-with-reasoning format described in **Interaction style**. Push back when the user is hand-waving over a real decision — don't let a vague answer pass just because a recommendation was offered.
 
 ### Phase 3 — Design (only if UI/visual work)
 
-If the sprint involves UI, grill one question at a time, with each question grounded in a concrete visual reference (existing component, mockup, sketch). Push back when the user is hand-waving over visual decisions.
+If the sprint involves UI, **every question gets its own HTML mockup page on the localhost scratchpad** with 2–3 visual options side by side. Refuse to proceed on pure verbal descriptions; the visual scratchpad is the contract that converts "I think it should look like…" into a thing you can both look at.
 
-- **Surfaces affected** — which screens / components / flows? Use the project's component library names where applicable.
-- **Visual references** — ask the user to paste mockups, point to existing components, or sketch in text. Refuse to proceed on pure verbal descriptions for non-trivial layout decisions.
-- **Interaction patterns** — what user actions exist, what state changes do they trigger? Walk through happy-path + edge-path step by step.
-- **Edge cases** — empty state, loading, error, no-data, very-long-data, mobile vs desktop if applicable.
-- **Accessibility constraints** — keyboard navigation, screen reader behaviour, contrast — surface explicitly if relevant.
+Grill one question at a time. For each surface, ask in this order:
 
-Convergence rule: do not exit this phase until every screen mentioned has at least one concrete visual anchor (mockup, sketch, component name) the agent will be able to reference.
+- **Surface identification** — which screen / component / flow are we deciding? Name it.
+- **Mockup the options** — produce `q<N>-<surface>.html` with 2–3 layouts/treatments. Recommend one with the badged option. Use real-looking content (proper text, not Lorem Ipsum). Cite where the option idea comes from (existing component? library reference? user's verbal sketch?).
+- **Interaction patterns** — once the layout is locked, walk through user actions step by step (happy path + edge path) using the chosen mockup as the surface.
+- **Edge cases** — empty state, loading, error, no-data, very-long-data, mobile vs desktop. Each gets its own variant in the mockup if non-trivial.
+- **Accessibility constraints** — keyboard navigation, screen reader behaviour, contrast — surface explicitly. If you're unsure whether the recommended layout passes WCAG AA contrast, say so.
+
+**Convergence rule:** do not exit this phase until every screen mentioned has a corresponding mockup file on the scratchpad that the user has signed off on (or explicitly deferred). "Locked, A is good" is the green light. "I dunno, looks fine" is not — push back for a real decision.
+
+**Iterate via Q<N>b**: if the user pushes back on every option, produce a hybrid `q<N>b-<surface>.html` drawing from their feedback. Don't keep arguing the original options.
+
+**At end of Phase 3 (optional but recommended for multi-surface sprints):** produce `cockpit-final.html` (or `<feature>-final.html`) stitching every chosen option into one live interactive page with tab switching + drawer open/close + route navigation. This becomes the ground-truth artifact every slice prompt references.
 
 ### Phase 4 — Vertical slicing
 
@@ -126,14 +230,21 @@ Push back on vague criteria ("works well") — they have to be testable.
 
 ### Phase 6 — Artifacts
 
-Ask if the sprint has accompanying artifacts:
+The scratchpad files from Phase 2 + Phase 3 are already candidate artifacts. Confirm with the user which ones survive into the sprint package:
 
-- Mock HTML files
+- **Every locked mockup** (`q<N>-<surface>.html` that drove a decision) — yes, always include
+- **Superseded mockups** (`q6.html` after `q6b.html` won) — usually skip, but keep if the comparison is useful for implementer context
+- **`cockpit-final.html` (or equivalent final assembly)** — yes, always include if produced
+- **`cockpit.css`** — yes, include; implementer slices will port it to real CSS-modules / tokens
+- **`index.html`** — skip; it's a session navigator, not implementation context
+
+Also ask about non-scratchpad artifacts:
+
 - Eval datasets
-- Sample inputs/outputs
-- Design references
+- Sample inputs/outputs the implementer will need
+- External design references (Figma exports, screenshots from another product)
 
-Capture the file paths or content. These will be copied into `artifacts/` by compose-sprint.
+Capture the file paths or content. `/compose-sprint` copies the locked-in scratchpad files into `.naml/sprints/<id>/artifacts/mockups/` and the non-scratchpad items into `.naml/sprints/<id>/artifacts/`.
 
 ### Phase 7 — Wrap
 
@@ -182,3 +293,6 @@ In that mode, skip Phase 1's intent capture (the inbox provides it), skip Phase 
 - **Prefer AFK over HITL.** HITL is only for slices that genuinely need a human decision (a design review, an architectural call).
 - **Touch glob honesty.** If a slice might touch a file, declare it. Better to over-declare and serialize than have a hidden conflict at PR time.
 - **Glossary vocabulary in titles.** "Add SchemaValidator integration" beats "Add validation thing."
+- **Visuals are mandatory, not optional.** Every architectural-or-design decision gets a mockup page on the localhost scratchpad. Verbal-only decisions don't survive context compaction and produce sprints that drift from intent at implementation time.
+- **Lead with a recommendation.** Each question's HTML page shows your recommended option badged. The user accepts, tweaks, or replaces — never picks from a menu of equal alternatives. Recommendations are the value the skill adds.
+- **Mockups outlive the chat.** The user can re-open the localhost page tomorrow and pick up where they left off. Treat scratchpad files as durable, not throwaway.
