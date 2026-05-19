@@ -152,7 +152,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser(
         "run",
-        help="execute a sprint package end-to-end (Phase 2: stops at PR-open)",
+        help="execute a sprint package end-to-end (stops at awaiting_signoff "
+             "after auto-review)",
     )
     p_run.add_argument("sprint_dir", help="path to a .naml/sprints/<id>/ directory")
     p_run.add_argument(
@@ -170,9 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument(
         "--stop-after",
-        choices=["pr"],
-        default="pr",
-        help="pipeline stage to stop after (Phase 2 only supports 'pr')",
+        choices=["pr", "review"],
+        default="review",
+        help="pipeline stage to stop after. 'pr' = PR opened, awaits human "
+             "review. 'review' (default) = auto-review run, sprint pauses "
+             "at awaiting_signoff. 'merge' is Phase 4.",
     )
     p_run.add_argument(
         "--root",

@@ -27,12 +27,13 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from .claude import RunResult, run_implementer
+from .claude import RunResult, parse_verdict, run_implementer, run_reviewer
 from .config import NamlConfig
 from .gates import run_gates
 from . import gitops
 from . import prompts
 from . import state as state_mod
+from . import states
 from .package import Slice, Sprint
 
 
@@ -48,7 +49,7 @@ class LaneContext:
     sprint_root: Path                # .naml/sprints/<id>/ resolved against repo
     lane_root: Path                  # parent dir for all worktrees
     log_dir: Path                    # where per-slice .log files land
-    stop_after: str = "pr"           # pr | review | merge — Phase 2 only honours "pr"
+    stop_after: str = "review"       # pr | review | merge — Phase 3 default = review
     overlap_findings: list[tuple[str, str, str, str]] = None  # set by Scheduler.preflight
 
     def __post_init__(self) -> None:
@@ -320,15 +321,23 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
             draft=False,
         )
         status.pr_url = pr_url
-
-        # ----- phase 2 terminal -----
-        # Phase 3 (issue #5) will fall through into the review state here.
-        # For now we stop at "pr": the slice is "done" from the scheduler's
-        # POV (its work is complete) but the slice STATE on disk is "pr"
-        # so a human can see the PR awaiting review.
-        _transition(status, "pr", sprint_root=sprint_root,
+        _transition(status, states.PR, sprint_root=sprint_root,
                     detail=f"opened {pr_url}")
-        return "pr"
+
+        if ctx.stop_after == "pr":
+            return states.PR
+
+        # ----- review -----
+        return _drive_review_loop(
+            ctx=ctx,
+            sprint=sprint,
+            slice_=slice_,
+            worktree=worktree,
+            branch=branch,
+            log_path=log_path,
+            upstream=upstream,
+            status=status,
+        )
 
     except Exception as exc:  # noqa: BLE001 — top-level lane safety net
         status.last_error = f"{type(exc).__name__}: {exc}"
@@ -356,6 +365,165 @@ def _result_ok(
         _transition(status, "failed", sprint_root=sprint_root, detail=status.last_error)
         return False
     return True
+
+
+def _drive_review_loop(
+    *,
+    ctx: LaneContext,
+    sprint: Sprint,
+    slice_: Slice,
+    worktree: Path,
+    branch: str,
+    log_path: Path,
+    upstream: dict[str, str],
+    status: state_mod.SliceStatus,
+) -> str:
+    """Run the review state up to ``states.RETRY_CAPS[REVIEW]`` attempts.
+
+    Verdict semantics:
+    - ``LGTM``            → state = ``review_passed``. Scheduler treats as done.
+    - ``REQUEST_CHANGES`` → resume implementer with the review text. Push
+                            again. Loop until the cap.
+    - ``ABANDON``         → state = ``needs_human_review``. Scheduler marks
+                            slice failed so dependents are blocked.
+    - ``UNKNOWN``         → treat as REQUEST_CHANGES with no actionable
+                            text, but eat one retry attempt (no infinite loop
+                            if the reviewer never emits a verdict line).
+    """
+    cfg = ctx.config
+    sprint_root = ctx.sprint_root
+    cap = states.retry_cap(states.REVIEW)
+
+    for attempt in range(1, cap + 1):
+        _record_attempt(status, states.REVIEW)
+        _transition(
+            status,
+            states.REVIEW,
+            sprint_root=sprint_root,
+            detail=f"reviewer attempt {attempt}/{cap}",
+        )
+
+        # Fetch the fresh diff for the reviewer.
+        try:
+            diff = gitops.pr_diff(branch, cwd=worktree, repo=cfg.repo)
+        except gitops.GhError as exc:
+            status.last_error = f"could not fetch PR diff: {exc}"
+            _transition(status, states.FAILED, sprint_root=sprint_root,
+                        detail=status.last_error)
+            return states.FAILED
+
+        review_prompt = prompts.reviewer_prompt(
+            sprint=sprint,
+            slice_=slice_,
+            pr_url=status.pr_url,
+            diff=diff,
+            upstream_summaries=upstream,
+        )
+        review_result = run_reviewer(
+            prompt=review_prompt,
+            log_path=log_path,
+            cwd=worktree,
+            claude_bin=cfg.claude_bin,
+            claude_config_dir=cfg.claude_config_dir,
+            cap_minutes=max(10, cfg.run_cap_minutes // 2),
+        )
+        if review_result.timed_out:
+            status.last_error = "reviewer agent hit the run cap"
+            _transition(status, states.FAILED, sprint_root=sprint_root,
+                        detail=status.last_error)
+            return states.FAILED
+
+        verdict = parse_verdict(review_result.final_text)
+        status.review_verdict = verdict
+        state_mod.save_slice_status(sprint_root, status)
+        log.info("[%s] reviewer verdict: %s", slice_.id, verdict)
+
+        if verdict == "LGTM":
+            _transition(status, states.REVIEW_PASSED, sprint_root=sprint_root,
+                        detail="auto-review LGTM")
+            return states.REVIEW_PASSED
+
+        if verdict == "ABANDON":
+            status.last_error = "reviewer abandoned — change unsalvageable"
+            _transition(status, states.NEEDS_HUMAN_REVIEW,
+                        sprint_root=sprint_root, detail=status.last_error)
+            return states.NEEDS_HUMAN_REVIEW
+
+        # REQUEST_CHANGES or UNKNOWN → if this was the last attempt, escalate.
+        if attempt >= cap:
+            status.last_error = (
+                f"review retries exhausted after {cap} attempts; final verdict {verdict}"
+            )
+            _transition(status, states.NEEDS_HUMAN_REVIEW,
+                        sprint_root=sprint_root, detail=status.last_error)
+            return states.NEEDS_HUMAN_REVIEW
+
+        # Resume the implementer in its original session with the review text.
+        _transition(status, states.WORK, sprint_root=sprint_root,
+                    detail=f"applying review (attempt {attempt})")
+        fix_prompt = prompts.request_changes_prompt(
+            review_text=review_result.final_text,
+            pr_url=status.pr_url,
+        )
+        impl_result = run_implementer(
+            prompt=fix_prompt,
+            session_id=status.session_id,
+            log_path=log_path,
+            cwd=worktree,
+            claude_bin=cfg.claude_bin,
+            claude_config_dir=cfg.claude_config_dir,
+            cap_minutes=cfg.run_cap_minutes,
+            resume=True,
+        )
+        if not _result_ok(impl_result, status, sprint_root):
+            return status.state
+
+        # Re-run gates so we don't push known-bad code back to the PR.
+        gate_result = run_gates(cfg.gates, cwd=worktree, log_path=log_path)
+        retries = 0
+        while not gate_result.passed and retries < cfg.max_retries:
+            retries += 1
+            retry_text = prompts.retry_prompt(
+                failed_gate=gate_result.failed_gate or "?", tail=gate_result.tail
+            )
+            impl_result = run_implementer(
+                prompt=retry_text,
+                session_id=status.session_id,
+                log_path=log_path,
+                cwd=worktree,
+                claude_bin=cfg.claude_bin,
+                claude_config_dir=cfg.claude_config_dir,
+                cap_minutes=cfg.run_cap_minutes,
+                resume=True,
+            )
+            if not _result_ok(impl_result, status, sprint_root):
+                return status.state
+            gate_result = run_gates(cfg.gates, cwd=worktree, log_path=log_path)
+
+        if not gate_result.passed:
+            status.last_error = (
+                f"gate '{gate_result.failed_gate}' failed during review fix loop"
+            )
+            _transition(status, states.FAILED, sprint_root=sprint_root,
+                        detail=status.last_error)
+            return states.FAILED
+
+        # Re-push (gh PR auto-updates the existing PR on the same branch).
+        if not gitops.diff_has_changes(
+            branch, cwd=worktree, base_branch=cfg.base_branch
+        ):
+            # The implementer claimed DONE but no new commits — escalate.
+            status.last_error = "implementer reported DONE but no new diff after review fix"
+            _transition(status, states.NEEDS_HUMAN_REVIEW,
+                        sprint_root=sprint_root, detail=status.last_error)
+            return states.NEEDS_HUMAN_REVIEW
+        gitops.push_branch(branch, cwd=worktree)
+
+    # Shouldn't reach here — the loop above always returns. Defensive.
+    status.last_error = "review loop exited without verdict"
+    _transition(status, states.NEEDS_HUMAN_REVIEW, sprint_root=sprint_root,
+                detail=status.last_error)
+    return states.NEEDS_HUMAN_REVIEW
 
 
 def cleanup_worktree(slice_status: state_mod.SliceStatus, *, repo_root: Path) -> None:

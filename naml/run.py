@@ -34,6 +34,7 @@ from .scheduler import (
     effective_lane_count,
 )
 from . import state as state_mod
+from . import states
 
 
 log = logging.getLogger("naml.run")
@@ -70,23 +71,44 @@ def _resolve_sprint_root(cfg: NamlConfig, sprint: Sprint) -> Path:
 def _aggregate_state(per_slice: dict[str, str], stop_after: str) -> str:
     """Roll per-slice states up to a sprint-level state.
 
-    Phase 2 semantics:
-    - any failed / blocked_upstream → ``partial_failure`` (still "complete enough
-      to inspect"); only ``failed`` if EVERY slice failed.
-    - else if all slices reached ``pr`` (or further) → ``awaiting_signoff``.
+    Rules:
+    - Every slice in ``LANE_FAILED_STATES`` → ``failed``.
+    - Any slice in ``LANE_FAILED_STATES`` → ``partial_failure``
+      (the rest finished but human attention is needed somewhere).
+    - All slices in ``LANE_DONE_STATES`` matching ``stop_after`` target →
+      ``awaiting_signoff``.
+    - Otherwise → ``executing`` (shouldn't be reached after run completes —
+      means a slice is still in flight, which is a bug).
     """
     if not per_slice:
-        return "failed"
-    failed = sum(1 for s in per_slice.values() if s in {"failed", "blocked_upstream"})
+        return states.SPRINT_FAILED
+
+    failed = sum(1 for s in per_slice.values() if s in states.LANE_FAILED_STATES)
     if failed == len(per_slice):
-        return "failed"
+        return states.SPRINT_FAILED
     if failed > 0:
-        return "partial_failure"
-    if stop_after == "pr":
-        if all(s == "pr" for s in per_slice.values()):
-            return "awaiting_signoff"
-    # Phase 3 will extend this for review / merge.
-    return "executing"
+        return states.SPRINT_PARTIAL_FAILURE
+
+    target_state = {
+        "pr": states.PR,
+        "review": states.REVIEW_PASSED,
+        "merge": states.MERGED,
+    }.get(stop_after, states.REVIEW_PASSED)
+
+    # Acceptable terminal states for an awaiting_signoff sprint: the target
+    # OR any further-along state.
+    acceptable = {
+        "pr": {states.PR, states.REVIEW_PASSED, states.MERGED},
+        "review": {states.REVIEW_PASSED, states.MERGED},
+        "merge": {states.MERGED},
+    }.get(stop_after, {states.REVIEW_PASSED, states.MERGED})
+
+    if all(s in acceptable for s in per_slice.values()):
+        if stop_after == "merge":
+            return states.SPRINT_COMPLETE
+        return states.SPRINT_AWAITING_SIGNOFF
+
+    return states.SPRINT_EXECUTING
 
 
 def run_sprint(
@@ -95,9 +117,14 @@ def run_sprint(
     *,
     overlap_policy: OverlapPolicy = "strict",
     lane_count: int | None = None,
-    stop_after: str = "pr",
+    stop_after: str = "review",
 ) -> RunReport:
-    """Run a sprint to its Phase-2 terminal (all slices at ``pr``).
+    """Run a sprint to the requested ``stop_after`` terminal.
+
+    Defaults to ``stop_after = "review"`` (Phase 3): every slice goes through
+    setup → work → pr → review, the sprint ends in ``awaiting_signoff``
+    once every slice has either passed review or escalated to
+    needs_human_review. Pass ``stop_after = "pr"`` to halt before review.
 
     Raises ``ScheduleError`` from pre-flight if ``overlap_policy='abort'``
     and the manifest declares overlapping independent slices. Otherwise
@@ -160,10 +187,10 @@ def run_sprint(
             sprint_state.slices[slice_id] = terminal_state
             state_mod.save_sprint_state(sprint_root, sprint_state)
 
-            if terminal_state in {"failed"}:
+            if terminal_state in states.LANE_FAILED_STATES:
                 scheduler.mark_failed(slice_id)
             else:
-                # Phase 2 treats "pr" as scheduler-done.
+                # Anything in LANE_DONE_STATES releases dependents.
                 scheduler.mark_done(slice_id)
 
     threads: list[threading.Thread] = []
