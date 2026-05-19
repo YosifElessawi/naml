@@ -29,6 +29,18 @@ failed     = "agent-failed"
 needs_info = "needs-info"
 
 
+# Symlink these repo-root paths into each new lane's worktree so gates can
+# find gitignored binaries (biome, tsc, vitest) without a per-lane
+# `pnpm install`. Default is just `.venv`; slice-11 added
+# `web/node_modules` after the `web-lint` gate failed with
+# `biome: command not found`. The lockfile isn't committed yet, so
+# symlinking from the source checkout is the only zero-install path.
+# Missing sources are silently skipped at worktree-creation time, so
+# the list is safe on machines that don't have one or the other.
+[worktree]
+symlinks = [".venv", "web/node_modules"]
+
+
 # Gate commands. naml's Python runtime stays close to stdlib (aiohttp is the
 # one runtime dep); tests run via stdlib `unittest discover` — no pytest
 # install required, and `python3` because macOS doesn't ship a bare `python`.

@@ -200,7 +200,12 @@ class EventsSnapshotTests(_SSEServerBase):
         self.assertEqual(ev["event"], "snapshot")
         self.assertEqual(ev["data"]["sprints"], {})
         self.assertEqual(ev["data"]["slices"], {})
-        self.assertEqual(ev["data"]["aggregates"], {})
+        # With slice-10's aggregator merged, build_app always constructs one.
+        # An aggregator with no JSONL data still returns its full structure;
+        # just verify per-slice / per-sprint are empty (i.e. no data ingested).
+        aggregates = ev["data"]["aggregates"]
+        self.assertEqual(aggregates.get("per_slice"), {})
+        self.assertEqual(aggregates.get("per_sprint"), {})
         self.assertIsInstance(ev["data"]["ts"], str)
         resp.close()
 

@@ -12,7 +12,10 @@ __pycache__/
 # Nested playground repo — its own git history lives at GitHub.
 /mock-target/
 
-# Web tier build artifacts
+# Web tier build artifacts.  Pattern with and without trailing slash so
+# the [worktree] symlink (a file-typed symlink pointing at a directory)
+# is also ignored — slash-only patterns match directories.
+web/node_modules
 web/node_modules/
 web/dist/
 web/.vite/
