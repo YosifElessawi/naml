@@ -27,6 +27,13 @@ DEFAULT_FEEDBACK_INBOX = Path("docs") / "feedback" / "inbox.md"
 DEFAULT_PARALLEL_LANES = 3
 HARD_LANE_CAP = 8
 
+# Default repo-root entries to symlink into each lane's worktree so the agent
+# can resolve gitignored-but-needed paths (e.g. ``.venv/bin/ruff``). Override
+# via ``[worktree] symlinks`` in the project config. Empty entries are
+# silently skipped at worktree-setup time so the default list is safe on
+# projects without a ``.venv``.
+DEFAULT_WORKTREE_SYMLINKS: tuple[str, ...] = (".venv",)
+
 
 class ConfigError(ValueError):
     """Raised when a config file is missing required keys or malformed."""
@@ -108,6 +115,13 @@ class NamlConfig:
     # [paths] — v2 (defaults relative to repo_root)
     sprints_dir: Path = field(default_factory=lambda: DEFAULT_SPRINTS_DIR)
     feedback_inbox: Path = field(default_factory=lambda: DEFAULT_FEEDBACK_INBOX)
+
+    # [worktree] — v2. Repo-root paths to symlink into each lane's worktree
+    # so the agent can resolve gitignored-but-needed paths (.venv,
+    # node_modules, .env, etc.) from inside.
+    worktree_symlinks: tuple[str, ...] = field(
+        default_factory=lambda: DEFAULT_WORKTREE_SYMLINKS
+    )
 
     # [logs]
     log_dir: Path | None = None
@@ -348,6 +362,22 @@ def load_config(start: Path | None = None) -> NamlConfig:
     except ValueError:
         feedback_inbox_rel = feedback_inbox
 
+    # [worktree]  (v2)
+    worktree_tbl = raw.get("worktree") or {}
+    if not isinstance(worktree_tbl, dict):
+        raise ConfigError(f"{path}: [worktree] must be a table")
+    symlinks_raw = worktree_tbl.get("symlinks")
+    if symlinks_raw is None:
+        worktree_symlinks: tuple[str, ...] = DEFAULT_WORKTREE_SYMLINKS
+    else:
+        if not isinstance(symlinks_raw, list) or not all(
+            isinstance(x, str) for x in symlinks_raw
+        ):
+            raise ConfigError(
+                f"{path}: [worktree] symlinks must be a list of strings"
+            )
+        worktree_symlinks = tuple(s.strip() for s in symlinks_raw if s.strip())
+
     # [logs]
     logs_tbl = raw.get("logs") or {}
     log_dir_raw = logs_tbl.get("dir")
@@ -382,5 +412,6 @@ def load_config(start: Path | None = None) -> NamlConfig:
         parallel_lanes_max=parallel_lanes_max,
         sprints_dir=sprints_dir_rel,
         feedback_inbox=feedback_inbox_rel,
+        worktree_symlinks=worktree_symlinks,
         log_dir=log_dir,
     )

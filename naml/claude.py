@@ -179,26 +179,136 @@ def _spawn(
     return proc, start_offset
 
 
+# Grace period after we see a successful ``type:result`` event in the log
+# before we SIGTERM the subprocess ourselves. Some Claude setups have Stop
+# hooks (e.g. cmux) that take seconds to clean up after the agent's work is
+# done; we let them finish if they can but refuse to wait the full run cap.
+RESULT_GRACE_SECONDS = 45
+
+# How often the log watcher polls for new bytes while waiting for the
+# subprocess to exit OR for the success-result event to appear.
+_POLL_INTERVAL_SECONDS = 0.5
+
+
+def _scan_for_success_event(
+    log_path: Path, start_offset: int, scan_offset: int
+) -> tuple[bool, int]:
+    """Scan log bytes since ``scan_offset`` for a ``type:result`` event.
+
+    Returns ``(found_success, new_scan_offset)``. ``found_success`` is True
+    iff a ``type:"result"`` event with ``is_error:false`` appears in the
+    new bytes (subtype is informational — we treat any non-error result
+    as completion, since some Claude versions emit ``subtype:"success"``
+    while others omit subtype on success). The caller uses the new offset
+    to avoid re-scanning bytes next iteration.
+    """
+    if not log_path.exists():
+        return False, scan_offset
+    try:
+        size = log_path.stat().st_size
+    except OSError:
+        return False, scan_offset
+    if size <= scan_offset:
+        return False, scan_offset
+    found = False
+    try:
+        with log_path.open("rb") as fh:
+            fh.seek(scan_offset)
+            for raw in fh:
+                line = raw.strip()
+                if not line or not line.startswith(b"{"):
+                    continue
+                try:
+                    ev = json.loads(line)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+                if not isinstance(ev, dict):
+                    continue
+                if ev.get("type") != "result":
+                    continue
+                # Some result events report tool/subagent errors; only the
+                # successful top-level result counts as completion.
+                if ev.get("is_error") is True:
+                    continue
+                found = True
+                # Don't break — pick up the latest in this chunk so any
+                # later error event in the same window overrides.
+            new_offset = size
+    except OSError:
+        new_offset = scan_offset
+    return found, new_offset
+
+
 def _wait_under_cap(
     proc: subprocess.Popen,
     *,
     log_path: Path,
+    start_offset: int,
     cap_minutes: int,
     label: str,
 ) -> tuple[bool, bool, int]:
-    """Wait for the process under the wall-clock cap.
+    """Wait for the subprocess under a two-tier cap.
 
     Returns ``(completed, timed_out, exit_code)``.
+
+    Tier 1 — agent emits ``type:result`` (success). We treat that as logical
+    completion. Give the subprocess ``RESULT_GRACE_SECONDS`` to drain its
+    Stop hooks / background tasks. If it hasn't exited by then we
+    ``SIGTERM`` the process group and report ``completed=True`` (logical
+    success); the kill is bookkeeping.
+
+    Tier 2 — wall-clock cap. If neither the result event nor a clean exit
+    arrive before ``cap_minutes * 60`` seconds, we ``SIGTERM`` and report
+    ``timed_out=True``.
+
+    This replaces a naive ``proc.wait(timeout=cap)`` that mis-classified
+    "agent done, subprocess waiting on hung Stop hook" as a timeout.
     """
     deadline = time.time() + cap_minutes * 60
-    try:
-        proc.wait(timeout=max(1, int(deadline - time.time())))
-    except subprocess.TimeoutExpired:
-        with log_path.open("a", encoding="utf-8") as log:
-            log.write(f"\n[naml] {label} cap of {cap_minutes}m hit — killing agent\n")
-        _kill_group(proc)
-        return False, True, -1
-    return True, False, proc.returncode
+    scan_offset = start_offset
+    result_seen_at: float | None = None
+
+    while True:
+        # Cheap probe: did the subprocess exit on its own?
+        try:
+            rc = proc.wait(timeout=_POLL_INTERVAL_SECONDS)
+            return True, False, rc
+        except subprocess.TimeoutExpired:
+            pass
+
+        now = time.time()
+
+        # Tier 1: did the agent already declare success in the log?
+        if result_seen_at is None:
+            seen, scan_offset = _scan_for_success_event(
+                log_path, start_offset, scan_offset
+            )
+            if seen:
+                result_seen_at = now
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write(
+                        f"\n[naml] {label}: success result observed; "
+                        f"waiting up to {RESULT_GRACE_SECONDS}s for subprocess exit\n"
+                    )
+
+        if result_seen_at is not None:
+            if now - result_seen_at >= RESULT_GRACE_SECONDS:
+                with log_path.open("a", encoding="utf-8") as log:
+                    log.write(
+                        f"\n[naml] {label}: grace expired post-result — "
+                        f"killing subprocess (treating as completed)\n"
+                    )
+                _kill_group(proc)
+                return True, False, 0
+
+        # Tier 2: wall-clock cap.
+        if now >= deadline:
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(
+                    f"\n[naml] {label} cap of {cap_minutes}m hit — killing agent\n"
+                )
+            _kill_group(proc)
+            return False, True, -1
 
 
 def run_implementer(
@@ -243,7 +353,11 @@ def run_implementer(
         header_label=label,
     )
     completed, timed_out, exit_code = _wait_under_cap(
-        proc, log_path=log_path, cap_minutes=cap_minutes, label=label
+        proc,
+        log_path=log_path,
+        start_offset=start_offset,
+        cap_minutes=cap_minutes,
+        label=label,
     )
     usage = _usage_from(_parse_final_result(log_path, start_offset))
     return RunResult(
@@ -285,7 +399,11 @@ def run_reviewer(
         header_label="REVIEW (fresh session)",
     )
     completed, timed_out, exit_code = _wait_under_cap(
-        proc, log_path=log_path, cap_minutes=cap_minutes, label="REVIEW"
+        proc,
+        log_path=log_path,
+        start_offset=start_offset,
+        cap_minutes=cap_minutes,
+        label="REVIEW",
     )
     final = _parse_final_result(log_path, start_offset)
     text = ""

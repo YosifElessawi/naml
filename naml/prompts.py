@@ -84,6 +84,20 @@ open a PR — the orchestrator handles those.
 - Implement EXACTLY what this slice asks — no more. Minimal change.
 - Respect the repo's CLAUDE.md and any ``.claude/rules/*`` files (conventional
   commits, no secrets, atomic commits, validate inputs).
+- The orchestrator runs the validation gates (lint + tests) AFTER you exit.
+  Do NOT run them yourself. Skip the local verification step — it wastes
+  time hunting for binaries inside an isolated worktree. If you really
+  want to spot-check, the project's ``.venv`` (and similar paths) are
+  symlinked into your worktree from the source repo, so commands like
+  ``.venv/bin/ruff`` and ``.venv/bin/pytest`` work directly — but you
+  do not need to do this.
+- Do NOT ``git merge``, ``git cherry-pick``, or otherwise pull upstream
+  dependency branches into your worktree. The work from your declared
+  ``depends_on`` slices reaches you ONLY as auto-injected upstream
+  summaries above. The orchestrator handles dependency composition at
+  merge time.
+- Do NOT push and do NOT open a PR. The orchestrator handles push, PR
+  open, review, and merge.
 - Commit your work using a clear conventional-commit message before exiting.
 - Before exiting, WRITE a brief summary of what you built to
   ``{summary_path_relative}`` — bullet points, ~10 lines, covering: what
