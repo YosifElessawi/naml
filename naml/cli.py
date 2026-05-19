@@ -10,7 +10,8 @@ Surface:
 - ``naml serve [--bind H] [--port P]`` — aiohttp server exposing /healthz,
                                   /api/state, /state, and the built web/
                                   bundle for the cockpit
-- ``naml run <sprint-dir>``    — execute a sprint package
+- ``naml run <sprint-dir>``    — execute a sprint package (exits 2 if any
+                                  configured gate's executable is missing)
 - ``naml merge <sprint-dir>``  — walk review-clean slices through the
                                   4-tier merge pipeline (Phase 4 / MVP)
 """
@@ -333,6 +334,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
             lane_count=args.lanes,
             stop_after=args.stop_after,
         )
+    except run_mod.GatePreflightError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 2
     except ScheduleError as exc:
         print(f"naml: {exc}", file=sys.stderr)
         return 1
