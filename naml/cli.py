@@ -12,6 +12,8 @@ Surface:
                                   bundle for the cockpit
 - ``naml run <sprint-dir>``    — execute a sprint package (exits 2 if any
                                   configured gate's executable is missing)
+- ``naml retry <sprint-dir> <slice-id>`` — reset a failed slice's status
+                                  so the next ``naml run`` reprocesses it
 - ``naml merge <sprint-dir>``  — walk review-clean slices through the
                                   4-tier merge pipeline (Phase 4 / MVP)
 """
@@ -128,6 +130,47 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_retry(args: argparse.Namespace) -> int:
+    from . import state as state_mod
+    from . import states as states_mod
+
+    sprint_root = Path(args.sprint_dir).expanduser().resolve()
+    if not sprint_root.is_dir():
+        print(
+            f"naml: sprint directory not found: {sprint_root}",
+            file=sys.stderr,
+        )
+        return 1
+
+    status = state_mod.load_slice_status(sprint_root, args.slice_id)
+    if status is None:
+        print(
+            f"naml: no status file for slice {args.slice_id!r} under {sprint_root}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if status.state not in states_mod.LANE_FAILED_STATES:
+        print(
+            f"naml: slice {args.slice_id} is in state {status.state!r}; "
+            f"only failed/blocked_upstream/merge_blocked slices can be retried",
+            file=sys.stderr,
+        )
+        return 1
+
+    status.state = states_mod.PENDING
+    status.attempts = {}
+    status.last_error = ""
+    status.record_transition(
+        state=states_mod.PENDING,
+        detail="retry requested via naml retry",
+    )
+    state_mod.save_slice_status(sprint_root, status)
+
+    print(f"retried {args.slice_id}: state=pending, attempts cleared")
+    return 0
+
+
 def _cmd_show_config(args: argparse.Namespace) -> int:
     try:
         cfg = load_config(Path(args.root) if args.root else None)
@@ -236,6 +279,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose", "-v", action="store_true", help="emit lane progress to stderr",
     )
     p_run.set_defaults(func=_cmd_run)
+
+    p_retry = sub.add_parser(
+        "retry",
+        help="reset a failed slice's status so the next naml run reprocesses it",
+    )
+    p_retry.add_argument(
+        "sprint_dir",
+        help="path to a .naml/sprints/<id>/ directory",
+    )
+    p_retry.add_argument("slice_id", help="slice id (e.g. slice-1)")
+    p_retry.add_argument(
+        "--root",
+        help="config root (default: cwd or walked up); accepted for "
+             "convention; this subcommand does not read config directly",
+    )
+    p_retry.set_defaults(func=_cmd_retry)
 
     p_merge = sub.add_parser(
         "merge",
