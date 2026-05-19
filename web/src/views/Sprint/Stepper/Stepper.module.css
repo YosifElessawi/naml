@@ -54,9 +54,7 @@
   background: var(--c-accent, #38bdf8);
   border-color: var(--c-accent, #38bdf8);
   color: #052735;
-  box-shadow:
-    0 0 0 4px rgba(56, 189, 248, 0.15),
-    0 0 14px rgba(56, 189, 248, 0.5);
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15), 0 0 14px rgba(56, 189, 248, 0.5);
   animation: pulse 2s ease-in-out infinite;
 }
 
@@ -132,15 +130,33 @@
   background: var(--bg-3, #1c2330);
 }
 
-.cellIdle { background: var(--c-idle, #4d5666); }
-.cellSetup { background: var(--c-setup, #6b7280); }
-.cellWork { background: var(--c-work, #38bdf8); }
-.cellPr { background: var(--c-pr, #a78bfa); }
-.cellReview { background: var(--c-review, #fbbf24); }
-.cellMerged { background: var(--c-merged, #34d399); }
-.cellFailed { background: var(--c-failed, #f87171); }
-.cellBlocked { background: var(--c-blocked, #94a3b8); }
-.cellHuman { background: var(--c-human, #fb923c); }
+.cellIdle {
+  background: var(--c-idle, #4d5666);
+}
+.cellSetup {
+  background: var(--c-setup, #6b7280);
+}
+.cellWork {
+  background: var(--c-work, #38bdf8);
+}
+.cellPr {
+  background: var(--c-pr, #a78bfa);
+}
+.cellReview {
+  background: var(--c-review, #fbbf24);
+}
+.cellMerged {
+  background: var(--c-merged, #34d399);
+}
+.cellFailed {
+  background: var(--c-failed, #f87171);
+}
+.cellBlocked {
+  background: var(--c-blocked, #94a3b8);
+}
+.cellHuman {
+  background: var(--c-human, #fb923c);
+}
 
 /* ── aux stat strip ── */
 .aux {
@@ -247,15 +263,12 @@
 
 /* keyframes — local to module; mockup uses the same name */
 @keyframes pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 4px rgba(56, 189, 248, 0.15),
-      0 0 14px rgba(56, 189, 248, 0.5);
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15), 0 0 14px rgba(56, 189, 248, 0.5);
   }
   50% {
-    box-shadow:
-      0 0 0 8px rgba(56, 189, 248, 0.08),
-      0 0 22px rgba(56, 189, 248, 0.65);
+    box-shadow: 0 0 0 8px rgba(56, 189, 248, 0.08), 0 0 22px rgba(56, 189, 248, 0.65);
   }
 }
 

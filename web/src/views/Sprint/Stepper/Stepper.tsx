@@ -2,9 +2,9 @@ import styles from "./Stepper.module.css";
 import { stepperFixture } from "./fixture.ts";
 import {
   type AlternateExit,
-  type SliceState,
   SPRINT_STATES,
   STATE_LABELS,
+  type SliceState,
   type StepperData,
 } from "./types.ts";
 
@@ -23,7 +23,7 @@ function stepGlyph(status: StepStatus, fallback: string): string {
   return fallback;
 }
 
-const cellClassByState: Record<SliceState, string> = {
+const cellClassByState: Record<SliceState, string | undefined> = {
   idle: styles.cellIdle,
   setup: styles.cellSetup,
   work: styles.cellWork,
@@ -49,14 +49,13 @@ export function Stepper({ data = stepperFixture }: StepperProps) {
 
   return (
     <section className={styles.root} data-testid="sprint-stepper">
-      <div className={styles.stepper} role="list" aria-label="Sprint state stepper">
+      <ol className={styles.stepper} aria-label="Sprint state stepper">
         {SPRINT_STATES.map((state, idx) => {
           const status = stepStatus(idx, currentIdx, allDone);
           const isLast = idx === SPRINT_STATES.length - 1;
           return (
-            <div
+            <li
               key={state}
-              role="listitem"
               data-state={state}
               data-status={status}
               className={classes(
@@ -74,10 +73,10 @@ export function Stepper({ data = stepperFixture }: StepperProps) {
               {state === "executing" && data.sliceStates.length > 0 ? (
                 <SubRail sliceStates={data.sliceStates} />
               ) : null}
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
 
       <AuxStrip aux={data.aux} />
       <AlternateExits hit={data.hitExits} />
