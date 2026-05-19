@@ -57,6 +57,23 @@ _REVIEWER_ALLOWED_TOOLS: str = (
 )
 
 
+# Tier-3 merger agent gets write access (Edit, git add, git rebase --continue)
+# but no push / merge / branch-flip surface. It's a one-shot — no session UUID.
+_MERGER_ALLOWED_TOOLS: tuple[str, ...] = (
+    "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep",
+    "Bash(*)",
+    "Bash(git add *)", "Bash(git add*)",
+    "Bash(git rebase --continue *)", "Bash(git rebase --continue)",
+    "Bash(git rebase --continue*)",
+    "Bash(git status*)", "Bash(git diff*)", "Bash(git log*)",
+    "Bash(git show*)",
+    "Bash(git ls-files*)",
+    # Lockfile / package manager ops the agent might need.
+    "Bash(pnpm *)", "Bash(npm *)", "Bash(yarn *)",
+    "Bash(uv *)", "Bash(pip *)", "Bash(pip3 *)",
+)
+
+
 @dataclass(frozen=True)
 class Usage:
     input_tokens: int = 0
@@ -404,6 +421,61 @@ def run_reviewer(
         start_offset=start_offset,
         cap_minutes=cap_minutes,
         label="REVIEW",
+    )
+    final = _parse_final_result(log_path, start_offset)
+    text = ""
+    if final:
+        raw = final.get("result")
+        if isinstance(raw, str):
+            text = raw
+    return RunResult(
+        completed=completed,
+        timed_out=timed_out,
+        exit_code=exit_code,
+        usage=_usage_from(final),
+        final_text=text,
+    )
+
+
+def run_merger(
+    *,
+    prompt: str,
+    log_path: Path,
+    cwd: Path,
+    claude_bin: str = "claude",
+    claude_config_dir: Path | None = None,
+    cap_minutes: int = 20,
+) -> RunResult:
+    """Run a fresh Tier-3 merger agent. Returns final text + usage.
+
+    Like ``run_reviewer`` (no ``--session-id`` so the agent never shares
+    context with the implementer) but with the merger allowlist: it can
+    Edit files, git add, and run ``git rebase --continue`` to resolve and
+    advance the rebase. Naml runs gates + finalizes the merge afterward —
+    the agent does NOT push or call ``gh pr merge``.
+    """
+    env = _claude_env(claude_config_dir)
+    cmd = [
+        claude_bin, "-p", prompt,
+        "--output-format", "stream-json", "--verbose",
+        "--permission-mode", "bypassPermissions",
+        "--dangerously-skip-permissions",
+        "--allowedTools", " ".join(_MERGER_ALLOWED_TOOLS),
+    ]
+    proc, start_offset = _spawn(
+        cmd,
+        cwd=cwd,
+        env=env,
+        log_path=log_path,
+        cap_minutes=cap_minutes,
+        header_label="MERGER (fresh session)",
+    )
+    completed, timed_out, exit_code = _wait_under_cap(
+        proc,
+        log_path=log_path,
+        start_offset=start_offset,
+        cap_minutes=cap_minutes,
+        label="MERGER",
     )
     final = _parse_final_result(log_path, start_offset)
     text = ""
