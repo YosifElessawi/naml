@@ -28,6 +28,7 @@ from typing import Any
 STATE_DIRNAME = "state"
 SUMMARY_FILENAME = "{slice_id}.summary.md"
 STATUS_FILENAME = "{slice_id}.status.json"
+TOKENS_FILENAME = "{slice_id}.tokens.jsonl"
 SPRINT_STATE_FILENAME = "sprint.json"
 MERGE_LOG_FILENAME = "merge-log.json"
 
@@ -231,6 +232,15 @@ def summary_path(sprint_root: Path, slice_id: str) -> Path:
 
 def status_path(sprint_root: Path, slice_id: str) -> Path:
     return state_dir(sprint_root) / STATUS_FILENAME.format(slice_id=slice_id)
+
+
+def tokens_path(sprint_root: Path, slice_id: str) -> Path:
+    """Path to the per-slice append-only JSONL with one line per Claude turn.
+
+    Source of truth for the cockpit's live cost / token telemetry. Format is
+    one JSON object per line; see ``naml.tokens.emit_turn`` for the schema.
+    """
+    return state_dir(sprint_root) / TOKENS_FILENAME.format(slice_id=slice_id)
 
 
 def sprint_state_path(sprint_root: Path) -> Path:

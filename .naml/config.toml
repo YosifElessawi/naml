@@ -29,11 +29,13 @@ failed     = "agent-failed"
 needs_info = "needs-info"
 
 
-# Gate commands. naml itself is stdlib-only for runtime; tests use pytest.
+# Gate commands. naml is stdlib-only — runtime AND tests. The test gate
+# runs via stdlib `unittest discover` so the orchestrator doesn't need a
+# pytest install, and `python3` because macOS doesn't ship a bare `python`.
 # Web slices (slice-1 onward) will add a TS/CSS tier — gates extend then.
 [[gates]]
 name = "test"
-argv = ["python", "-m", "pytest", "tests/", "-q"]
+argv = ["python3", "-m", "unittest", "discover", "-s", "tests"]
 
 # Uncomment once the web/ tier is added (slice-1 lands):
 # [[gates]]

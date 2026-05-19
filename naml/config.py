@@ -107,6 +107,11 @@ class NamlConfig:
     session_reset_at: str | None = None
     weekly_reset_at: str | None = None
     cost_calibration: float = 1.0
+    # Maximum tokens that fit in the active model's context window. Drives the
+    # cockpit's per-turn context-% meter (amber at 70%, red at 85%). Default
+    # is Claude Opus 4.x's standard 200k window; bump to 1_000_000 when using
+    # the [1m] extended-context variant.
+    model_context_max: int = 200_000
 
     # [lanes]  — v2 (with sensible defaults if absent)
     parallel_lanes_default: int = DEFAULT_PARALLEL_LANES
@@ -332,6 +337,16 @@ def load_config(start: Path | None = None) -> NamlConfig:
     if cost_calibration <= 0:
         cost_calibration = 1.0
 
+    model_context_max_raw = claude_tbl.get("model_context_max", 200_000)
+    if isinstance(model_context_max_raw, bool) or not isinstance(
+        model_context_max_raw, int
+    ) or model_context_max_raw <= 0:
+        raise ConfigError(
+            f"{path}: [claude] model_context_max must be a positive integer, "
+            f"got {model_context_max_raw!r}"
+        )
+    model_context_max = int(model_context_max_raw)
+
     # [lanes]  (v2)
     lanes_tbl = raw.get("lanes") or {}
     parallel_lanes_default = int(lanes_tbl.get("default", DEFAULT_PARALLEL_LANES))
@@ -408,6 +423,7 @@ def load_config(start: Path | None = None) -> NamlConfig:
         session_reset_at=session_reset_at,
         weekly_reset_at=weekly_reset_at,
         cost_calibration=cost_calibration,
+        model_context_max=model_context_max,
         parallel_lanes_default=parallel_lanes_default,
         parallel_lanes_max=parallel_lanes_max,
         sprints_dir=sprints_dir_rel,

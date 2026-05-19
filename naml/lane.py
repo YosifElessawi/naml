@@ -230,6 +230,7 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
 
         # ----- work + gates loop -----
         _transition(status, "work", sprint_root=sprint_root)
+        tokens_jsonl = state_mod.tokens_path(sprint_root, slice_id)
         result = run_implementer(
             prompt=prompt_text,
             session_id=status.session_id,
@@ -240,6 +241,9 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
             cap_minutes=cfg.run_cap_minutes,
             resume=False,
             display_name=f"naml-{sprint.id}-{slice_id}",
+            tokens_jsonl_path=tokens_jsonl,
+            slice_id=slice_id,
+            model_context_max=cfg.model_context_max,
         )
         if not _result_ok(result, status, sprint_root):
             return status.state
@@ -266,6 +270,9 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
                 claude_config_dir=cfg.claude_config_dir,
                 cap_minutes=cfg.run_cap_minutes,
                 resume=True,
+                tokens_jsonl_path=tokens_jsonl,
+                slice_id=slice_id,
+                model_context_max=cfg.model_context_max,
             )
             if not _result_ok(result, status, sprint_root):
                 return status.state
@@ -395,6 +402,7 @@ def _drive_review_loop(
     cfg = ctx.config
     sprint_root = ctx.sprint_root
     cap = states.retry_cap(states.REVIEW)
+    tokens_jsonl = state_mod.tokens_path(sprint_root, slice_.id)
 
     for attempt in range(1, cap + 1):
         _record_attempt(status, states.REVIEW)
@@ -476,6 +484,9 @@ def _drive_review_loop(
             claude_config_dir=cfg.claude_config_dir,
             cap_minutes=cfg.run_cap_minutes,
             resume=True,
+            tokens_jsonl_path=tokens_jsonl,
+            slice_id=slice_.id,
+            model_context_max=cfg.model_context_max,
         )
         if not _result_ok(impl_result, status, sprint_root):
             return status.state
@@ -497,6 +508,9 @@ def _drive_review_loop(
                 claude_config_dir=cfg.claude_config_dir,
                 cap_minutes=cfg.run_cap_minutes,
                 resume=True,
+                tokens_jsonl_path=tokens_jsonl,
+                slice_id=slice_.id,
+                model_context_max=cfg.model_context_max,
             )
             if not _result_ok(impl_result, status, sprint_root):
                 return status.state
