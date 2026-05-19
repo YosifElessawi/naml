@@ -150,10 +150,19 @@ def run_sprint(
     state_mod.ensure_state_dir(sprint_root)
     sprint_state = state_mod.SprintState(
         sprint_id=sprint.id,
-        state="executing",
+        state=states.SPRINT_PACKAGE_RECEIVED,
         lanes_configured=cfg.parallel_lanes_default,
         lanes_effective=lane_count_resolved,
         slices={s.id: "pending" for s in sprint.slices},
+    )
+    sprint_state.record_transition(
+        state=states.SPRINT_PACKAGE_RECEIVED,
+        detail=f"lanes={lane_count_resolved}, slices={len(sprint.slices)}",
+    )
+    sprint_state.state = states.SPRINT_EXECUTING
+    sprint_state.record_transition(
+        state=states.SPRINT_EXECUTING,
+        detail="DAG built, lanes spawning",
     )
     state_mod.save_sprint_state(sprint_root, sprint_state)
 
@@ -209,7 +218,18 @@ def run_sprint(
         per_slice[sid] = status.state if status else snapshot.get(sid, "pending")
 
     aggregate = _aggregate_state(per_slice, stop_after)
-    sprint_state.state = aggregate
+    if aggregate != sprint_state.state:
+        sprint_state.state = aggregate
+        ok_count = sum(
+            1 for s in per_slice.values() if s in states.LANE_DONE_STATES
+        )
+        fail_count = sum(
+            1 for s in per_slice.values() if s in states.LANE_FAILED_STATES
+        )
+        sprint_state.record_transition(
+            state=aggregate,
+            detail=f"{ok_count}/{len(per_slice)} slices clear; {fail_count} need attention",
+        )
     sprint_state.slices = per_slice
     state_mod.save_sprint_state(sprint_root, sprint_state)
 

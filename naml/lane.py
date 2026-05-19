@@ -154,6 +154,7 @@ def _transition(
     detail: str = "",
 ) -> None:
     status.state = new_state
+    status.record_transition(state=new_state, detail=detail)
     if detail:
         log.info("[%s] → %s (%s)", status.slice_id, new_state, detail)
     else:
