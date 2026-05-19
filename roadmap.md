@@ -50,14 +50,14 @@ This tool owns **step 2**, for any project.
     `config.py` into that config file or env.
 - **Drop-in model.** Placed at a target repo's root, it exposes `make`
   commands and "just works." The canonical home of the tool's own source is
-  `~/Desktop/claudey/`.
+  `~/Desktop/Naml/`.
 - Fix `OPERATING.md`'s scope framing accordingly.
 
 ## Current state (prototype — working, not yet rescoped)
 
 Python 3 stdlib orchestrator. Today it lives **untracked** inside the Deka
 repo (`scripts/afk-orchestrator/` + `/Makefile`, via `.git/info/exclude`) —
-to be lifted out to `~/Desktop/claudey/` and de-coupled.
+to be lifted out to `~/Desktop/Naml/` and de-coupled.
 
 What works:
 - Watches a "ready" issue label; one inner loop shared by `slow` (one issue)
@@ -145,7 +145,7 @@ Mirror this: clean sectioned rows, each a labeled progress bar with % remaining
 ## Open decisions
 
 - UI surface — web page vs menu-bar vs both (leaning web-first).
-- **Give the tool its own git repo** (e.g. `~/Desktop/claudey/` becomes a
+- **Give the tool its own git repo** (e.g. `~/Desktop/Naml/` becomes a
   repo). Right now the prototype is untracked local files with no history.
 - **Multi-account / multi-config** — the build is moving to a higher-limit
   work account. `CLAUDE_CONFIG_DIR` and the `claude-personal` assumption must
@@ -157,7 +157,7 @@ Mirror this: clean sectioned rows, each a labeled progress bar with % remaining
 
 | Phase | Work | Why first |
 |-------|------|-----------|
-| 0 | Rename → `agents-orchestrator`; lift out of the Deka repo to `~/Desktop/claudey/`; per-project config file; strip Deka coupling | Makes it the real tool |
+| 0 | Rename → `agents-orchestrator`; lift out of the Deka repo to `~/Desktop/Naml/`; per-project config file; strip Deka coupling | Makes it the real tool |
 | A | Capture per-run token usage (parse `--output-format json`) | Low effort, unlocks UI data |
 | B | Batching — `batch:` label + multi-issue session | Cost + context win |
 | C | Pipeline stages + configurable stop point + auto-review | Control |
@@ -176,7 +176,7 @@ Mirror this: clean sectioned rows, each a labeled progress bar with % remaining
   turns. "Resume" spins a fresh process on the same conversation.
 - The prototype source is currently at
   `~/Projects/Deka-Press/scripts/afk-orchestrator/` + `~/Projects/Deka-Press/
-  Makefile` — untracked (in `.git/info/exclude`). Lift it to `~/Desktop/claudey/`
+  Makefile` — untracked (in `.git/info/exclude`). Lift it to `~/Desktop/Naml/`
   as part of Phase 0. A git-history backup also sits on the local branch
   `feat/afk-orchestrator` in that repo until you discard it.
 - Nothing of this tool is on any GitHub remote — keep it that way unless you
