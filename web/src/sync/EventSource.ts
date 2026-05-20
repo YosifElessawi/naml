@@ -108,9 +108,12 @@ export class SseClient {
     const es = this.factory(this.url);
     this.es = es;
     es.onopen = () => {
-      this.lastEventMs = this.now();
+      // TCP-level open is necessary but not sufficient for "live". The
+      // sync dot promises the cockpit is showing fresh data; we only
+      // know that's true once at least one event (snapshot / ping /
+      // state-update / metric-tick) has been parsed. Until then we
+      // stay CONNECTING and just clear the reconnect-attempt counter.
       this.store.patch("reconnectAttempt", 0);
-      this.setSync("live");
     };
     es.onerror = () => {
       // EventSource will auto-reconnect. We bump the attempt counter

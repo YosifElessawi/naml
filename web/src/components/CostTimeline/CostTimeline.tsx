@@ -67,9 +67,14 @@ export function CostTimeline({
       const prev = displayedRef.current[field];
       if (prev === next) continue;
       cancels.current[field]?.();
-      cancels.current[field] = tweenFn(prev, next, tweenMs, (v) => {
-        setDisplayed((d) => ({ ...d, [field]: v }));
-      });
+      cancels.current[field] = tweenFn(
+        prev,
+        next,
+        (v) => {
+          setDisplayed((d) => ({ ...d, [field]: v }));
+        },
+        { durationMs: tweenMs },
+      );
     }
   }, [metrics, tweenFn, tweenMs]);
 

@@ -33,29 +33,32 @@ describe("SliceQueue", () => {
     expect(ids).toEqual(["slice-c", "slice-a", "slice-b", "slice-z"]);
   });
 
-  it("uses the Flip utility around the DOM reorder", () => {
+  it("re-orders via FlipList — playFromSnapshot fires on commit", () => {
     const store = new Store();
     act(() => {
       store.patchSlice("slice-a", makeSlice("slice-a", "work"));
       store.patchSlice("slice-b", makeSlice("slice-b", "work"));
     });
     const flip = new Flip((el) => el.dataset.sliceId);
-    flip.reducedMotionOverride = false;
-    const captureSpy = vi.spyOn(flip, "capture");
-    const playSpy = vi.spyOn(flip, "play");
-    render(<SliceQueue store={store} flip={flip} />);
+    flip.reducedMotionOverride = true; // jsdom-stable
+    const playSpy = vi.spyOn(flip, "playFromSnapshot");
 
-    captureSpy.mockClear();
+    render(<SliceQueue store={store} flip={flip} />);
+    // First commit: play was called once with an empty prev map.
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    expect(playSpy.mock.calls[0]?.[1]?.size).toBe(0);
     playSpy.mockClear();
 
     act(() => {
       // Promote slice-b to needs_human_review (priority 0) — slice-b
-      // should jump to the front, triggering a Flip play.
+      // jumps to the front, FlipList animates from the prior layout.
       store.patchSlice("slice-b", makeSlice("slice-b", "needs_human_review"));
     });
 
-    expect(captureSpy).toHaveBeenCalled();
     expect(playSpy).toHaveBeenCalled();
+    // The prev map this time should be populated (2 slices).
+    const lastCall = playSpy.mock.calls[playSpy.mock.calls.length - 1];
+    expect(lastCall?.[1]?.size).toBe(2);
   });
 
   it("renders the state stripe + state pill animation classes", () => {

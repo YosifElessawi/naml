@@ -173,3 +173,12 @@ export function emptyStore(): NamlStore {
     reconnectAttempt: 0,
   };
 }
+
+// --- Compatibility aliases for slice-11's store/index.ts ----------------
+// slice-11's store/index.ts (on main) imports `StoreState` and
+// `initialStoreState` from this module. slice-13 renamed those to
+// `NamlStore` / `emptyStore()`. Aliases keep both call sites working
+// without a synchronous rename — the plumbing PR can unify later.
+
+export type StoreState = NamlStore;
+export const initialStoreState: StoreState = emptyStore();

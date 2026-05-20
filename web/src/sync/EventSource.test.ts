@@ -189,4 +189,15 @@ describe("SseClient", () => {
     client.stop();
     expect(fakeEs.closed).toBe(true);
   });
+
+  it("holds CONNECTING after `onopen` until the first event arrives", () => {
+    // start() already called in beforeEach.
+    expect(store.getState().syncStatus).toBe("connecting");
+    if (fakeEs.onopen) fakeEs.onopen(new Event("open"));
+    expect(store.getState().syncStatus).toBe("connecting");
+    expect(store.getState().reconnectAttempt).toBe(0);
+    // First real event flips us to live.
+    fakeEs.emit("ping", { t: "2026-05-20T00:00:00Z" });
+    expect(store.getState().syncStatus).toBe("live");
+  });
 });

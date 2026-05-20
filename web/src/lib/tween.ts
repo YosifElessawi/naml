@@ -48,6 +48,10 @@ export interface TweenOptions {
 
 const DEFAULT_DURATION_MS = 600;
 
+/** Public alias used by slice-13's CostTimeline and other consumers that
+ * want to default to the canonical "casino counter" tween length. */
+export const DEFAULT_TWEEN_MS = DEFAULT_DURATION_MS;
+
 /**
  * Start a tween. The first call to ``onUpdate`` is the initial ``from``
  * value on the next frame; subsequent calls march the value toward ``to``;

@@ -4,9 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { Store } from "../../store/store.ts";
 import { CostTimeline } from "./CostTimeline.tsx";
 
-/** Test-friendly tween that fires the final value synchronously. */
-const syncTween: typeof import("../../lib/tween.ts").tween = (_from, to, _ms, onTick) => {
-  onTick(to);
+/** Test-friendly tween that fires the final value synchronously.
+ * Matches slice-12's tween signature: (from, to, onUpdate, options?). */
+const syncTween: typeof import("../../lib/tween.ts").tween = (_from, to, onUpdate) => {
+  onUpdate(to);
   return () => {};
 };
 

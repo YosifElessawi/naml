@@ -48,9 +48,10 @@ function makeFake(): FakeES {
   };
 }
 
-/** Sync tween — keeps the test deterministic by skipping the RAF dance. */
-const syncTween: typeof import("../lib/tween.ts").tween = (_from, to, _ms, cb) => {
-  cb(to);
+/** Sync tween — keeps the test deterministic by skipping the RAF dance.
+ * Matches slice-12's tween signature: (from, to, onUpdate, options?). */
+const syncTween: typeof import("../lib/tween.ts").tween = (_from, to, onUpdate) => {
+  onUpdate(to);
   return () => {};
 };
 

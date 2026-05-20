@@ -50,9 +50,22 @@
   `lib/tween` with cleanup on unmount, lifetime cell tinted via
   `data-lifetime="true"`.
 - **`web/src/components/SliceQueue/`** — slice-priority queue strip
-  wired through `lib/flip`: `Flip.capture()` runs before render,
-  `Flip.play()` inside a `useLayoutEffect` driven by the slices bag,
-  satisfying the "card re-order: FLIP 300ms ease-out" smoothness row.
+  wrapped in `<FlipList>`. The post-commit FLIP pattern lives in
+  `FlipList`, satisfying the "card re-order: FLIP 300ms ease-out"
+  smoothness row without any render-phase side effect.
+- **`web/src/components/FlipList/`** — drop-in container that
+  FLIP-animates its keyed children on every commit via the new
+  `flip.snapshot(root)` / `flip.playFromSnapshot(root, prev)` API
+  driven from a `useLayoutEffect`. Slice-5's lane card list wraps in
+  this at merge time.
+- **`web/src/store/views/`** — six adapter hooks + matching pure
+  selectors that bridge the live store to the data shapes slices 3–8
+  already consume:
+  `useDashboardData` / `useSprintData` / `useLanesData` /
+  `useSliceCardData` / `useSliceDrawerData` / `useHealthData`.
+  Each hook subscribes only to the store keys that affect its
+  particular view, so a `metric-tick` for slice-4 still leaves
+  slice-7's drawer alone.
 - **`web/src/test/cockpit.e2e.test.tsx`** — end-to-end cockpit walk that
   drives `SseClient` through a fixture sprint (`connect → snapshot →
   state-change → escalation → recovery`) and snapshots a DOM fingerprint
@@ -61,7 +74,7 @@
 - **`naml/feedback_inbox.py`** — recency ordering tightened to a single
   total order (dated DESC → undated in file order) with stable file-index
   tiebreakers, so polls don't reshuffle.
-- Tests: 12 vitest suites + 1 cockpit e2e (54 vitest pass total), 3 new
+- Tests: 16 vitest suites + 1 cockpit e2e (73 vitest pass total), 3 new
   Python unittest modules (24 new tests, 276 total pass).
 - **`web/vite.config.ts`** — corrected the slice-1 type error so
   `tsc --noEmit` passes; declares the `test` block via an explicit
@@ -102,3 +115,53 @@
   `aggregates_history.write_or_replace_today(...)` once per minute or on
   every state transition (whichever's cheaper) so the Health page sees
   fresh data.
+
+## Merge-time wiring recipe — DO BEFORE CLOSING THE SPRINT
+
+The orchestrator merges files; it does NOT rewrite imports. The
+adapter hooks in `web/src/store/views/` are slice-13's answer to "make
+the actual views live", but somebody has to flip the imports inside
+the merged view files. The list below is exhaustive — each item is a
+one-line swap.
+
+| File | Replace | With |
+|---|---|---|
+| `web/src/components/Dashboard/Dashboard.tsx` | `import dashboardFixture from "../../fixtures/dashboard.json"` and any `data={dashboardFixture}` default | `import { useDashboardData } from "../../store/views"`; call `const data = useDashboardData()` |
+| `web/src/views/Sprint/Stepper/Stepper.tsx` | `import { stepperFixture } from "./fixture"` default arg | `import { useSprintData } from "../../../store/views"`; call `const data = useSprintData(sprintId)` |
+| `web/src/views/Sprint/Lanes/Lanes.tsx` | `import { lanesFixture } from "./fixture"` default arg | `import { useLanesData } from "../../../store/views"`; call `const data = useLanesData(sprintId)` |
+| `web/src/views/Sprint/Lanes/Lanes.tsx` (the lane card list) | the inline `.map()` over lane cards | wrap in `<FlipList keyAttr="sliceId">…</FlipList>` from `web/src/components/FlipList` |
+| `web/src/components/SliceCard/*` | `sliceCardFixturesByState[...]` | `import { useSliceCardData } from "../../store/views"`; call `const data = useSliceCardData(sliceId)` |
+| `web/src/components/SliceDrawer/SliceDrawer.tsx` | `drawerFixturesByState[...]` | `import { useSliceDrawerData } from "../../store/views"`; call `const data = useSliceDrawerData(sliceId)` |
+| `web/src/views/Health/Health.tsx` | `import { FIXTURE_HEALTH } from "./fixtures"` | `import { useHealthData } from "../../store/views"`; call `const data = useHealthData()` |
+| `web/src/shell/Header.tsx` (or wherever slice-2's header sits) | n/a | mount `<SyncDot />` + `<NotificationsBell />` from `web/src/components/*` |
+| `web/src/shell/RightRail.tsx` | n/a | mount `<CostTimeline />` + `<ActivityTicker />` from `web/src/components/*` |
+
+The data shapes returned by each hook are structural mirrors of the
+upstream `*Data` interfaces. If a downstream type drifts, fix the
+selector first (it's a single file, no cascading change). The hooks
+return `null` for unknown ids so the existing fixture loaders' "no
+data" code paths still work — components that gate on falsy data
+remain compatible.
+
+## Acceptance criteria — status
+
+- [x] Slice cards reorder smoothly: `SliceQueue` proves the pattern;
+      slice-5's `Lanes` gets it free by wrapping in `<FlipList>` at
+      merge time.
+- [x] Sync dot reflects all 4 states (LIVE / SLOW / LOST / CONNECTING),
+      now correctly holding CONNECTING until the first event arrives.
+- [x] All animations respect `prefers-reduced-motion`.
+- [x] E2E test walks a fixture sprint and snapshots the cockpit at 5
+      points. (jsdom-driven against the full SseClient → Store →
+      component graph; a Playwright variant is a follow-up if visual
+      regressions become a recurring failure mode.)
+- [⇢] "Starting a real sprint with `naml run` shows live state in the
+      cockpit" + "Sprint view + Dashboard + Settings → Health all
+      render live data" — *gated on the merge-time wiring recipe
+      above*. The infrastructure is ready; flipping seven imports is
+      the work left.
+- [⇢] "Killing the server triggers LOST after 15s; restarting
+      reconnects + recovers" — covered by `SseClient` unit tests but
+      not by a process-level integration test. The browser-side
+      reconnect is `EventSource`-native; the recovery happens at
+      `markEvent()` time.

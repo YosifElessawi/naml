@@ -107,4 +107,54 @@ describe("Flip", () => {
     stubRect(a, 100);
     expect(flip.play(root)).toBe(0);
   });
+
+  it("snapshot() returns a plain map without mutating internal state", () => {
+    const a = appendChild(root, "a");
+    const b = appendChild(root, "b");
+    stubRect(a, 0);
+    stubRect(b, 100);
+
+    const flip = new Flip((el) => el.dataset.sliceId);
+    const snap = flip.snapshot(root);
+    expect(snap.get("a")?.x).toBe(0);
+    expect(snap.get("b")?.x).toBe(100);
+    // Internal snapshot stays empty — caller owns the returned map.
+    expect(flip.play(root)).toBe(0);
+  });
+
+  it("playFromSnapshot animates from a caller-owned prev map", () => {
+    const a = appendChild(root, "a");
+    const b = appendChild(root, "b");
+    stubRect(a, 0);
+    stubRect(b, 200);
+
+    const flip = new Flip((el) => el.dataset.sliceId);
+    flip.reducedMotionOverride = false;
+    const prev = flip.snapshot(root);
+
+    stubRect(a, 200);
+    stubRect(b, 0);
+
+    expect(flip.playFromSnapshot(root, prev)).toBe(2);
+    expect(a.style.transform).toBe("");
+    expect(b.style.transform).toBe("");
+  });
+
+  it("playFromSnapshot is a no-op when prev is empty", () => {
+    const a = appendChild(root, "a");
+    stubRect(a, 0);
+    const flip = new Flip((el) => el.dataset.sliceId);
+    flip.reducedMotionOverride = false;
+    expect(flip.playFromSnapshot(root, new Map())).toBe(0);
+  });
+
+  it("playFromSnapshot respects prefers-reduced-motion", () => {
+    const a = appendChild(root, "a");
+    stubRect(a, 0);
+    const flip = new Flip((el) => el.dataset.sliceId);
+    const prev = flip.snapshot(root);
+    flip.reducedMotionOverride = true;
+    stubRect(a, 200);
+    expect(flip.playFromSnapshot(root, prev)).toBe(0);
+  });
 });
