@@ -190,6 +190,64 @@ describe("SseClient", () => {
     expect(fakeEs.closed).toBe(true);
   });
 
+  it("translates server-side nested per_project aggregates into flat ProjectMetrics", () => {
+    // Pinned against an actual `/aggregates` payload — the server ships
+    // per-bucket nested objects, but the cockpit's ProjectMetrics is
+    // flat (today_cost / week_cost / ...). Drift here means the
+    // dashboard + right rail go dark on cold start, which is the bug
+    // that filed this test.
+    fakeEs.emit("snapshot", {
+      aggregates: {
+        per_project: {
+          today: { cost_usd: 249.69, tokens_in: 817, tokens_out: 23675 },
+          this_week: { cost_usd: 717.6 },
+          last_30d: { cost_usd: 717.6 },
+          lifetime: {
+            cost_usd: 717.6,
+            tokens_in: 2842,
+            tokens_out: 99704,
+            cache_read: 320772587,
+            cache_write: 12209448,
+            started_at: "2026-05-19T20:35:03+00:00",
+          },
+        },
+        per_slice: {
+          "slice-10": {
+            slice_id: "slice-10",
+            sprint_id: "2026-05-19-cockpit-v2",
+            cost_usd: 48.19,
+            tokens_in: 186,
+            tokens_out: 7631,
+            ctx_pct: 96,
+            last_event_at: "2026-05-19T20:54:51+00:00",
+          },
+        },
+        per_sprint: {
+          "2026-05-19-cockpit-v2": {
+            sprint_id: "2026-05-19-cockpit-v2",
+            cost_usd: 717.6,
+            tokens_in: 2842,
+            tokens_out: 99704,
+          },
+        },
+      },
+    });
+    const state = store.getState();
+    expect(state.project_metrics.today_cost).toBe(249.69);
+    expect(state.project_metrics.week_cost).toBe(717.6);
+    expect(state.project_metrics.last_30d_cost).toBe(717.6);
+    expect(state.project_metrics.lifetime_cost).toBe(717.6);
+    expect(state.project_metrics.tokens_in).toBe(2842);
+    expect(state.project_metrics.cache_read).toBe(320772587);
+    // Slice metrics keyed by both bare id and composite sprint::slice.
+    expect(state.slice_metrics["slice-10"]?.cost_usd).toBe(48.19);
+    expect(state.slice_metrics["slice-10"]?.ctx_pct).toBe(96);
+    expect(state.slice_metrics["2026-05-19-cockpit-v2::slice-10"]?.cost_usd).toBe(48.19);
+    // Sprint metrics derive `tokens` from tokens_in+out when not explicit.
+    expect(state.sprint_metrics["2026-05-19-cockpit-v2"]?.cost_usd).toBe(717.6);
+    expect(state.sprint_metrics["2026-05-19-cockpit-v2"]?.tokens).toBe(2842 + 99704);
+  });
+
   it("translates the aiohttp server's snake_case snapshot schema", () => {
     // Pinned against an actual `/events` payload to keep the adapter
     // honest. The server emits the on-disk schema verbatim — snake_case
