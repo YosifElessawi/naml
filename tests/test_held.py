@@ -177,6 +177,116 @@ class SchedulerPreservesHeldTests(unittest.TestCase):
         self.assertTrue(state_mod.is_hold_requested(sprint_root, "slice-1"))
 
 
+class ProcessSliceHeldResumeTests(unittest.TestCase):
+    """``process_slice`` must fast-forward past setup when the slice is already
+    in ``held``: keep the existing worktree, keep the session_id, and resume
+    the Claude session rather than starting a fresh one."""
+
+    def setUp(self) -> None:
+        self._tmp = Path(tempfile.mkdtemp(prefix="naml-held-resume-")).resolve()
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
+    def _make_ctx_and_status(self) -> tuple[object, state_mod.SliceStatus, Path]:
+        from naml.package import load_sprint
+        from tests.test_package import _build_sprint
+
+        sprint_root = _build_sprint(
+            self._tmp,
+            slices=[{"id": "slice-1", "title": "A", "type": "AFK", "depends_on": [], "touches": []}],
+        )
+        sprint = load_sprint(sprint_root)
+
+        # Held slice with all the state a real previous run would have left.
+        state_mod.ensure_state_dir(sprint_root)
+        worktree = self._tmp / "wt-slice-1"
+        worktree.mkdir()
+        status = state_mod.SliceStatus(
+            slice_id="slice-1",
+            state=states.HELD,
+            session_id="prev-session-uuid",
+            worktree=str(worktree),
+            branch="naml/sprint-A/slice-1",
+        )
+        status.record_transition(state=states.HELD, detail="user HOLD")
+        state_mod.save_slice_status(sprint_root, status)
+        state_mod.write_hold_requested(sprint_root, "slice-1")
+
+        class _Cfg:
+            repo = "owner/repo"
+            repo_root = self._tmp
+            base_branch = "main"
+            worktree_symlinks = ()
+            claude_bin = "claude"
+            claude_config_dir = None
+            run_cap_minutes = 1
+            max_retries = 0
+            model_context_max = 200_000
+            gates: tuple = ()
+
+        ctx = lane_mod.LaneContext(
+            config=_Cfg(),
+            sprint=sprint,
+            sprint_root=sprint_root,
+            lane_root=self._tmp / "lane-root",
+            log_dir=self._tmp / "logs",
+            stop_after="pr",
+        )
+        return ctx, status, sprint_root
+
+    def test_held_resume_skips_setup_and_uses_existing_session(self) -> None:
+        ctx, status, sprint_root = self._make_ctx_and_status()
+
+        # Clear the sentinel ahead of time so the spin loop exits
+        # immediately when the lane enters it.
+        state_mod.clear_hold_requested(sprint_root, "slice-1")
+
+        # Capture the args run_implementer was called with so we can
+        # assert resume=True and session_id preservation.
+        impl_calls: list[dict] = []
+
+        def fake_run_implementer(**kwargs):
+            impl_calls.append(kwargs)
+            return lane_mod.RunResult(
+                completed=True, timed_out=False, exit_code=0,
+                usage=__import__("naml.claude", fromlist=["Usage"]).Usage(),
+            )
+
+        # Stub out the rest of the work loop so we don't need a real
+        # worktree / git / gates.
+        with mock.patch.object(lane_mod, "run_implementer", side_effect=fake_run_implementer), \
+             mock.patch.object(lane_mod, "run_gates") as fake_gates, \
+             mock.patch.object(lane_mod, "gitops") as fake_gitops:
+            fake_gates.return_value = mock.Mock(passed=True, failed_gate=None, tail="")
+            fake_gitops.diff_has_changes.return_value = True
+            fake_gitops.push_branch.return_value = None
+            fake_gitops.create_pr.return_value = "https://example/pr/1"
+
+            final_state = lane_mod.process_slice("slice-1", ctx)
+
+        # Did NOT re-run setup → worktree_add never called.
+        fake_gitops.worktree_add.assert_not_called()
+        # session_id preserved (no fresh UUID minted on top of it).
+        self.assertEqual(status.session_id, "prev-session-uuid")
+        # First implementer call used resume=True so claude --resume hits
+        # the existing session, not --session-id which would 409.
+        self.assertGreater(len(impl_calls), 0)
+        self.assertTrue(impl_calls[0]["resume"], "first call must resume the held session")
+        self.assertEqual(impl_calls[0]["session_id"], "prev-session-uuid")
+        # No fresh display_name (that's only for new sessions).
+        self.assertIsNone(impl_calls[0].get("display_name"))
+        # Slice followed through to PR — held-resume is end-to-end, not a
+        # dead-end.
+        self.assertEqual(final_state, states.PR)
+        # On disk, status reflects the final state.
+        reloaded = state_mod.load_slice_status(sprint_root, "slice-1")
+        assert reloaded is not None
+        self.assertEqual(reloaded.state, states.PR)
+        # session_id still the same on disk.
+        self.assertEqual(reloaded.session_id, "prev-session-uuid")
+
+
 class InterveneEndpointUnitTests(unittest.TestCase):
     """Drive ``server._intervene_response`` directly — no event loop."""
 
