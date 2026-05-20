@@ -360,15 +360,48 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+// The aiohttp server emits the on-disk schema verbatim: snake_case keys
+// (slice_id, sprint_id, pr_url, …) and a `slices: Record<id, state>` map
+// inside each sprint. The cockpit's store uses camelCase + derived
+// counts, so this is the translation seam — keep snake_case parsing here
+// and never leak it past the SSE adapter.
+
+function pickString(raw: Record<string, unknown>, ...keys: string[]): string | null {
+  for (const k of keys) {
+    const v = raw[k];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return null;
+}
+
+function deriveSprintIdFromCompositeKey(id: string): string {
+  // Slice keys are emitted as `<sprint-id>::<slice-id>`; older callers
+  // pass a bare slice id. Either is acceptable.
+  const idx = id.indexOf("::");
+  return idx >= 0 ? id.slice(0, idx) : "";
+}
+
+function countMerged(slices: Record<string, unknown>): number {
+  let n = 0;
+  for (const v of Object.values(slices)) {
+    // `slices` inside a sprint summary is a map of id → state string.
+    if (v === "merged") n += 1;
+  }
+  return n;
+}
+
 function mergeSlice(
   prev: SliceSummary | undefined,
   raw: Record<string, unknown>,
   id: string,
 ): SliceSummary {
+  const sprintIdFromRaw = pickString(raw, "sprintId", "sprint_id");
+  const sprintIdFromKey = deriveSprintIdFromCompositeKey(id);
+  const title = pickString(raw, "title", "slice_id");
   const base: SliceSummary = prev ?? {
     id,
-    sprintId: typeof raw.sprintId === "string" ? (raw.sprintId as string) : "",
-    title: "",
+    sprintId: sprintIdFromRaw ?? sprintIdFromKey,
+    title: title ?? "",
     state: "pending",
     lane: null,
     updatedAt: nowIso(),
@@ -376,8 +409,8 @@ function mergeSlice(
   return {
     ...base,
     id,
-    sprintId: typeof raw.sprintId === "string" ? (raw.sprintId as string) : base.sprintId,
-    title: typeof raw.title === "string" ? (raw.title as string) : base.title,
+    sprintId: sprintIdFromRaw ?? base.sprintId ?? sprintIdFromKey,
+    title: title ?? base.title,
     state: typeof raw.state === "string" ? (raw.state as SliceState) : base.state,
     lane: typeof raw.lane === "number" ? (raw.lane as number) : base.lane,
     updatedAt: nowIso(),
@@ -389,22 +422,34 @@ function mergeSprint(
   raw: Record<string, unknown>,
   id: string,
 ): SprintSummary {
+  const title = pickString(raw, "title", "sprint_id") ?? id;
+  // Counts: prefer explicit slicesDone/slicesTotal when the caller already
+  // has them (state-update deltas), otherwise derive from the inline
+  // slices map the snapshot payload carries.
+  let slicesDone: number | null =
+    typeof raw.slicesDone === "number" ? (raw.slicesDone as number) : null;
+  let slicesTotal: number | null =
+    typeof raw.slicesTotal === "number" ? (raw.slicesTotal as number) : null;
+  if (raw.slices && typeof raw.slices === "object") {
+    const sliceMap = raw.slices as Record<string, unknown>;
+    if (slicesTotal === null) slicesTotal = Object.keys(sliceMap).length;
+    if (slicesDone === null) slicesDone = countMerged(sliceMap);
+  }
   const base: SprintSummary = prev ?? {
     id,
-    title: "",
+    title,
     state: "planning",
-    slicesDone: 0,
-    slicesTotal: 0,
+    slicesDone: slicesDone ?? 0,
+    slicesTotal: slicesTotal ?? 0,
     updatedAt: nowIso(),
   };
   return {
     ...base,
     id,
-    title: typeof raw.title === "string" ? (raw.title as string) : base.title,
+    title,
     state: typeof raw.state === "string" ? (raw.state as SprintState) : base.state,
-    slicesDone: typeof raw.slicesDone === "number" ? (raw.slicesDone as number) : base.slicesDone,
-    slicesTotal:
-      typeof raw.slicesTotal === "number" ? (raw.slicesTotal as number) : base.slicesTotal,
+    slicesDone: slicesDone ?? base.slicesDone,
+    slicesTotal: slicesTotal ?? base.slicesTotal,
     updatedAt: nowIso(),
   };
 }

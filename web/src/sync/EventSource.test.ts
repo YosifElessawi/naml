@@ -190,6 +190,48 @@ describe("SseClient", () => {
     expect(fakeEs.closed).toBe(true);
   });
 
+  it("translates the aiohttp server's snake_case snapshot schema", () => {
+    // Pinned against an actual `/events` payload to keep the adapter
+    // honest. The server emits the on-disk schema verbatim — snake_case
+    // keys and an inline `slices: Record<id, state>` map per sprint —
+    // so the adapter has to derive slicesDone/slicesTotal/title.
+    fakeEs.emit("snapshot", {
+      ts: "2026-05-20T15:58:09.837842+00:00",
+      sprints: {
+        "2026-05-19-cockpit-v2": {
+          sprint_id: "2026-05-19-cockpit-v2",
+          state: "merge_blocked",
+          lanes_configured: 1,
+          lanes_effective: 2,
+          slices: {
+            "slice-1": "merged",
+            "slice-2": "review_passed",
+            "slice-9": "merged",
+            "slice-14": "merged",
+          },
+          transitions: [],
+        },
+      },
+      slices: {
+        "2026-05-19-cockpit-v2::slice-1": {
+          slice_id: "slice-1",
+          state: "merged",
+          branch: "naml/2026-05-19-cockpit-v2/slice-1",
+        },
+      },
+    });
+    const sprint = store.getState().sprints["2026-05-19-cockpit-v2"];
+    expect(sprint).toBeDefined();
+    expect(sprint?.title).toBe("2026-05-19-cockpit-v2");
+    expect(sprint?.state).toBe("merge_blocked");
+    expect(sprint?.slicesTotal).toBe(4);
+    expect(sprint?.slicesDone).toBe(3); // three "merged" entries
+    const slice = store.getState().slices["2026-05-19-cockpit-v2::slice-1"];
+    expect(slice?.sprintId).toBe("2026-05-19-cockpit-v2");
+    expect(slice?.title).toBe("slice-1");
+    expect(slice?.state).toBe("merged");
+  });
+
   it("holds CONNECTING after `onopen` until the first event arrives", () => {
     // start() already called in beforeEach.
     expect(store.getState().syncStatus).toBe("connecting");
