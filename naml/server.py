@@ -163,6 +163,95 @@ def _make_api_state_handler(cfg: Any):
     return _handler
 
 
+def _config_payload(cfg: Any) -> dict[str, Any]:
+    """Translate the loaded NamlConfig into the shape the cockpit's
+    Settings view consumes (`NamlSettings` in web/src/views/Settings/types.ts).
+
+    Token-limit + reset fields can be ``None`` on the Python side; the
+    cockpit accepts ``null`` and renders a placeholder.
+    """
+    gates = [
+        {
+            "name": g.name,
+            "argv": " ".join(g.argv) if isinstance(g.argv, (list, tuple)) else str(g.argv),
+            "status": "idle",
+        }
+        for g in getattr(cfg, "gates", [])
+    ]
+    labels = getattr(cfg, "labels", None)
+    lifecycle = (
+        [
+            labels.naml_running,
+            labels.naml_review,
+            labels.naml_human_review,
+            labels.naml_done,
+        ]
+        if labels is not None
+        else []
+    )
+    return {
+        "project": {
+            "repoSlug": cfg.repo,
+            "baseBranch": cfg.base_branch,
+            "projectRoot": str(cfg.repo_root),
+            "adrFolder": "docs/adrs/",
+            "lifetimeSince": "2026-03-14",
+            "labels": {
+                "sprintPrefix": "sprint:",
+                "slicePrefix": "slice:",
+                "lifecycle": lifecycle,
+            },
+        },
+        "lanes": {
+            "defaultLanes": cfg.parallel_lanes_default,
+            "dagWidthDetection": True,
+            "hardCap": cfg.parallel_lanes_max,
+        },
+        "gates": gates,
+        "account": {
+            "configDir": (
+                str(cfg.claude_config_dir) if cfg.claude_config_dir else "~/.claude"
+            ),
+            "configDirOptions": [
+                "~/.claude · default",
+                "~/.claude-personal · personal",
+                "~/.claude-work · work",
+            ],
+            "model": "claude-opus-4-7",
+            "modelOptions": [
+                "claude-opus-4-7",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
+            ],
+            "contextWindow": cfg.model_context_max,
+            "sessionTokenLimit": cfg.session_token_limit,
+            "weeklyTokenLimit": cfg.weekly_token_limit,
+            "sessionResetAt": cfg.session_reset_at,
+            "weeklyResetAt": cfg.weekly_reset_at,
+        },
+        "sync": {
+            "heartbeatSeconds": 2,
+            "slowThresholdSeconds": 5,
+            "lostThresholdSeconds": 15,
+            "reduceMotion": False,
+        },
+        "advanced": {
+            "featureFlags": {},
+            "rawConfigToml": "",
+        },
+    }
+
+
+def _make_config_handler(cfg: Any):
+    async def _handler(_request: web.Request) -> web.Response:
+        try:
+            return web.json_response(_config_payload(cfg))
+        except Exception:  # noqa: BLE001 — defence in depth
+            log.exception("/config handler failed")
+            return web.Response(status=500, text="internal error")
+    return _handler
+
+
 async def _handle_aggregates_get(request: web.Request) -> web.Response:
     """Return the current aggregator snapshot.
 
@@ -843,6 +932,7 @@ def build_app(
 
     app.router.add_get("/healthz", _handle_healthz)
     app.router.add_get("/api/state", _make_api_state_handler(cfg))
+    app.router.add_get("/config", _make_config_handler(cfg))
     app.router.add_get("/api/feedback-inbox", _make_feedback_inbox_handler(cfg))
     app.router.add_get(
         "/api/aggregates-history", _make_aggregates_history_handler(cfg)

@@ -1,4 +1,3 @@
-import dashboardJson from "../../fixtures/dashboard.json";
 import styles from "./Dashboard.module.css";
 import type {
   CostSlice,
@@ -8,8 +7,7 @@ import type {
   SliceStateColor,
   SprintRowData,
 } from "./types";
-
-const data = dashboardJson as DashboardData;
+import { useDashboardLive } from "./useDashboardLive.ts";
 
 /** Hash-routing navigation — compatible with the slice-2 router (`#/sprint/:id`). */
 function openSprint(id: string): void {
@@ -18,7 +16,15 @@ function openSprint(id: string): void {
   }
 }
 
-export function Dashboard(): JSX.Element {
+export interface DashboardProps {
+  /** Inject a pre-shaped payload for tests / playground; defaults to the
+   *  live-store-backed `useDashboardLive()` selector. */
+  data?: DashboardData;
+}
+
+export function Dashboard({ data: injected }: DashboardProps = {}): JSX.Element {
+  const live = useDashboardLive();
+  const data = injected ?? live;
   return (
     <section className={styles.dashboard} aria-label="Dashboard">
       <Hero data={data} />

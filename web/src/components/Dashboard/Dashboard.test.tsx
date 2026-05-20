@@ -15,14 +15,14 @@ describe("Dashboard", () => {
   });
 
   it("renders the hero with project name and state pill", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     expect(screen.getByText(data.project.name)).toBeInTheDocument();
     expect(screen.getByLabelText(/project state/i)).toHaveTextContent(data.project.state);
     expect(screen.getByText(/sprints shipped/i)).toBeInTheDocument();
   });
 
   it("renders the Q7b primary cost cluster (4 stats)", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     const costCluster = screen.getByLabelText(/cost timeline/i);
     const cluster = within(costCluster);
     expect(cluster.getByText("TODAY")).toBeInTheDocument();
@@ -34,7 +34,7 @@ describe("Dashboard", () => {
   });
 
   it("renders the secondary health row with tone classes", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     const healthRow = screen.getByLabelText(/^pipeline health$/i);
     const row = within(healthRow);
     for (const stat of data.health) {
@@ -44,7 +44,7 @@ describe("Dashboard", () => {
   });
 
   it("groups sprints into ACTIVE / QUEUED / RECENT with counts", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     const headings = screen.getAllByRole("heading", { level: 2 });
     const headingText = headings
       .map((h) => h.textContent ?? "")
@@ -59,7 +59,7 @@ describe("Dashboard", () => {
   });
 
   it("renders each sprint row with a state-coloured mini-strip cell per slice", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     const active = data.sprints.active[0];
     expect(active).toBeDefined();
     if (!active) return;
@@ -74,7 +74,7 @@ describe("Dashboard", () => {
   });
 
   it("navigates to /sprint/<id> on row click", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     const queued = data.sprints.queued[0];
     expect(queued).toBeDefined();
     if (!queued) return;
@@ -86,14 +86,14 @@ describe("Dashboard", () => {
   });
 
   it("inbox count badge turns amber when > 3 unfiled", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     const badge = screen.getByTestId("inbox-count");
     expect(badge.textContent).toMatch(/4 unfiled/);
     expect(badge.getAttribute("data-warn")).toBe("true");
   });
 
   it("renders the inbox bullets with source lines", () => {
-    render(<Dashboard />);
+    render(<Dashboard data={data} />);
     for (const bullet of data.inbox.bullets) {
       expect(screen.getByText(bullet.text)).toBeInTheDocument();
     }

@@ -33,6 +33,20 @@ class _StubCfg:
     def __init__(self, repo_root: Path, sprints_path: Path) -> None:
         self.repo_root = repo_root
         self.sprints_path = sprints_path
+        # Fields the /config translator reads. Defaults match the real
+        # NamlConfig defaults so tests stay representative.
+        self.repo = "owner/repo"
+        self.base_branch = "main"
+        self.gates = []
+        self.labels = None
+        self.parallel_lanes_default = 3
+        self.parallel_lanes_max = 8
+        self.claude_config_dir = None
+        self.model_context_max = 200_000
+        self.session_token_limit = None
+        self.weekly_token_limit = None
+        self.session_reset_at = None
+        self.weekly_reset_at = None
 
 
 def _make_cfg(td: str) -> _StubCfg:
@@ -164,6 +178,25 @@ class StatePlaceholderTests(_ServerIntegrationBase):
         resp = await self.client.get("/state")
         self.assertEqual(resp.status, 200)
         self.assertEqual(await resp.json(), {})
+
+
+class ConfigEndpointTests(_ServerIntegrationBase):
+    async def test_config_returns_settings_shape(self) -> None:
+        resp = await self.client.get("/config")
+        self.assertEqual(resp.status, 200)
+        payload = await resp.json()
+        # Pin the shape against `web/src/views/Settings/types.ts` so a
+        # drift here causes a test failure rather than a runtime crash
+        # in the cockpit.
+        for key in ("project", "lanes", "gates", "account", "sync", "advanced"):
+            self.assertIn(key, payload)
+        self.assertEqual(payload["project"]["repoSlug"], "owner/repo")
+        self.assertEqual(payload["project"]["baseBranch"], "main")
+        self.assertEqual(payload["lanes"]["defaultLanes"], 3)
+        self.assertEqual(payload["lanes"]["hardCap"], 8)
+        self.assertEqual(payload["account"]["contextWindow"], 200_000)
+        self.assertIsNone(payload["account"]["sessionTokenLimit"])
+        self.assertIsInstance(payload["gates"], list)
 
 
 class StaticServingTests(_ServerIntegrationBase):
