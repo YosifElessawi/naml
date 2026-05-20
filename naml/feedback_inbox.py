@@ -104,13 +104,19 @@ def build_response(path: Path, recent: int = 3) -> dict[str, Any]:
         { unfiledCount: int, bullets: [{ id, text, source, addedAt }, …] }
     """
     bullets = load_inbox(path)
-    # Most recent N — preserve file order but assume newest is at the top
-    # of each section (the user adds new bullets above old ones). If a
-    # bullet carries a date, sort by it desc, else preserve order.
-    dated = [b for b in bullets if b.added_at]
-    undated = [b for b in bullets if not b.added_at]
-    dated.sort(key=lambda b: b.added_at or "", reverse=True)
-    ordered = dated + undated
+    # Single total ordering for the "most recent" head:
+    #   1. Dated bullets come first, ordered newest → oldest.
+    #   2. Undated bullets follow, in the order they appear in the file.
+    # The file-index tiebreaker keeps the order stable across polls so
+    # bullet ids don't shuffle in the UI.
+    indexed = list(enumerate(bullets))
+    dated = sorted(
+        (pair for pair in indexed if pair[1].added_at),
+        key=lambda pair: (pair[1].added_at or "", -pair[0]),
+        reverse=True,
+    )
+    undated = [pair for pair in indexed if not pair[1].added_at]
+    ordered = [b for _, b in dated] + [b for _, b in undated]
     head = ordered[:recent]
     return {
         "unfiledCount": len(bullets),

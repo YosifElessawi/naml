@@ -36,8 +36,33 @@
   `build_response` wire helper.
 - **`naml/server.py`** — added two new routes:
   `GET /api/feedback-inbox` and `GET /api/aggregates-history?days=N`.
-- Tests: 7 store/sync vitest suites (36 vitest pass), 3 new Python
-  unittest modules (24 new tests, 276 total pass).
+- **`web/src/components/ActivityTicker/`** — right-rail React component
+  that subscribes to `store.transitions`, renders newest-first with the
+  `.naml-anim-ticker-entry` slide-in class, and surfaces an "Ns ago"
+  age label.
+- **`web/src/components/NotificationsBell/`** — header bell that filters
+  `store.sprints` + `store.slices` for the four escalation states
+  (`failed`, `merge_blocked`, `awaiting_signoff`, `needs_human_review`),
+  exposes a popover dialog, and exports `selectEscalations` as a pure
+  selector.
+- **`web/src/components/CostTimeline/`** — right-rail four-window cost
+  block driven by `store.project_metrics`; each counter is animated by
+  `lib/tween` with cleanup on unmount, lifetime cell tinted via
+  `data-lifetime="true"`.
+- **`web/src/components/SliceQueue/`** — slice-priority queue strip
+  wired through `lib/flip`: `Flip.capture()` runs before render,
+  `Flip.play()` inside a `useLayoutEffect` driven by the slices bag,
+  satisfying the "card re-order: FLIP 300ms ease-out" smoothness row.
+- **`web/src/test/cockpit.e2e.test.tsx`** — end-to-end cockpit walk that
+  drives `SseClient` through a fixture sprint (`connect → snapshot →
+  state-change → escalation → recovery`) and snapshots a DOM fingerprint
+  at all 5 points, asserting sync state, cost numbers, queue ordering,
+  notifications bell label, and activity ticker contents.
+- **`naml/feedback_inbox.py`** — recency ordering tightened to a single
+  total order (dated DESC → undated in file order) with stable file-index
+  tiebreakers, so polls don't reshuffle.
+- Tests: 12 vitest suites + 1 cockpit e2e (54 vitest pass total), 3 new
+  Python unittest modules (24 new tests, 276 total pass).
 - **`web/vite.config.ts`** — corrected the slice-1 type error so
   `tsc --noEmit` passes; declares the `test` block via an explicit
   intersection type since vite@6 / vitest@2 type packages disagree.
