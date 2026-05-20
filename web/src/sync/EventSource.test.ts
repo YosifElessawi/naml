@@ -1,200 +1,203 @@
-// Tests for the EventSource wrapper. jsdom does not implement
-// EventSource, so we hand the wrapper a mock constructor that lets us
-// fire arbitrary events at will. The mock mirrors the bits of the native
-// API we use: addEventListener("open"|"error"|<custom>), close(), and
-// MessageEvent.lastEventId.
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Store } from "../store/store.ts";
+import { LOST_THRESHOLD_MS, SLOW_THRESHOLD_MS, SseClient } from "./EventSource.ts";
 
-import { createStore } from "../store";
-import type { StoreState } from "../store/types";
-
-import { LOST_AFTER_MS, NamlEventSource, SLOW_AFTER_MS } from "./EventSource";
-
-type Handler = (ev: MessageEvent) => void;
-type OpenErrorHandler = () => void;
-
-class MockEventSource {
-  static lastInstance: MockEventSource | null = null;
-
-  public readonly url: string;
-  public closed = false;
-  private readonly handlers = new Map<string, Set<Handler | OpenErrorHandler>>();
-
-  constructor(url: string) {
-    this.url = url;
-    MockEventSource.lastInstance = this;
-  }
-
-  addEventListener(type: string, fn: Handler | OpenErrorHandler): void {
-    let set = this.handlers.get(type);
-    if (!set) {
-      set = new Set();
-      this.handlers.set(type, set);
-    }
-    set.add(fn);
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  emit(type: string, data: unknown, id?: number | string): void {
-    const set = this.handlers.get(type);
-    if (!set) return;
-    const ev = {
-      type,
-      data: typeof data === "string" ? data : JSON.stringify(data),
-      lastEventId: id !== undefined ? String(id) : "",
-    } as unknown as MessageEvent;
-    for (const fn of set) (fn as Handler)(ev);
-  }
-
-  emitBare(type: "open" | "error"): void {
-    const set = this.handlers.get(type);
-    if (!set) return;
-    for (const fn of set) (fn as OpenErrorHandler)();
-  }
+interface FakeES {
+  listeners: Map<string, (ev: MessageEvent) => void>;
+  emit(event: string, data: unknown): void;
+  close: () => void;
+  closed: boolean;
+  onerror: ((ev: Event) => void) | null;
+  onopen: ((ev: Event) => void) | null;
 }
 
-describe("NamlEventSource", () => {
+function makeFake(): FakeES {
+  const listeners = new Map<string, (ev: MessageEvent) => void>();
+  const es: FakeES = {
+    listeners,
+    closed: false,
+    onerror: null,
+    onopen: null,
+    emit(event, data) {
+      const cb = listeners.get(event);
+      if (!cb) return;
+      cb({ data: JSON.stringify(data) } as MessageEvent);
+    },
+    close() {
+      this.closed = true;
+    },
+  };
+  return es;
+}
+
+describe("SseClient", () => {
+  let store: Store;
+  let fakeEs: FakeES;
+  let nowMs = 1_000_000;
+  let client: SseClient;
+  const tickHandles: Array<() => void> = [];
+
   beforeEach(() => {
-    MockEventSource.lastInstance = null;
+    store = new Store();
+    fakeEs = makeFake();
+    nowMs = 1_000_000;
+    client = new SseClient(store, {
+      url: "/events",
+      factory: () => ({
+        addEventListener: (type, cb) => fakeEs.listeners.set(type, cb),
+        close: () => fakeEs.close(),
+        get onerror() {
+          return fakeEs.onerror;
+        },
+        set onerror(v) {
+          fakeEs.onerror = v;
+        },
+        get onopen() {
+          return fakeEs.onopen;
+        },
+        set onopen(v) {
+          fakeEs.onopen = v;
+        },
+      }),
+      now: () => nowMs,
+      setInterval: (cb) => {
+        tickHandles.push(cb);
+        return tickHandles.length;
+      },
+      clearInterval: () => {},
+    });
+    client.start();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    client.stop();
+    tickHandles.length = 0;
   });
 
-  function makeES(store = createStore()) {
-    const es = new NamlEventSource(store, {
-      url: "/events",
-      EventSourceCtor: MockEventSource as unknown as typeof EventSource,
-      now: () => Date.now(),
-      syncTickMs: 50,
-    });
-    return { es, store };
-  }
-
-  it("connects on start and reports `connecting`", () => {
-    const { es, store } = makeES();
-    es.start();
+  it("starts in `connecting` and goes to `live` on snapshot", () => {
     expect(store.getState().syncStatus).toBe("connecting");
-    expect(MockEventSource.lastInstance?.url).toBe("/events");
-    es.stop();
+    fakeEs.emit("snapshot", { sprints: {}, slices: {} });
+    expect(store.getState().syncStatus).toBe("live");
+    expect(store.getState().lastEventAt).toBeTruthy();
   });
 
-  it("applies a snapshot payload to the store and flips to `connected`", () => {
-    const { es, store } = makeES();
-    es.start();
-
-    const snap = {
-      ts: "2026-05-20T00:00:00Z",
-      sprints: { "sprint-A": { sprint_id: "sprint-A", state: "executing" } },
+  it("merges snapshot sprints + slices + aggregates into the store", () => {
+    fakeEs.emit("snapshot", {
+      sprints: {
+        "sprint-1": {
+          id: "sprint-1",
+          title: "Cockpit",
+          state: "executing",
+          slicesDone: 1,
+          slicesTotal: 3,
+        },
+      },
       slices: {
-        "sprint-A::slice-1": { slice_id: "slice-1", state: "work" },
+        "slice-3": {
+          id: "slice-3",
+          sprintId: "sprint-1",
+          title: "Dashboard",
+          state: "work",
+          lane: 1,
+        },
       },
-      aggregates: { lifetime: { cost_usd: 0 } },
-    };
-    MockEventSource.lastInstance?.emit("snapshot", snap, 5);
-
-    const s = store.getState();
-    expect(s.syncStatus).toBe("connected");
-    expect(s.sprints["sprint-A"]?.state).toBe("executing");
-    expect(s.slices["sprint-A::slice-1"]?.state).toBe("work");
-    expect(s.lastEventId).toBe(5);
-    es.stop();
-  });
-
-  it("applies a state-update delta", () => {
-    const { es, store } = makeES();
-    es.start();
-    // Seed with a snapshot.
-    MockEventSource.lastInstance?.emit(
-      "snapshot",
-      {
-        ts: "x",
-        sprints: {},
-        slices: { "sprint-A::slice-1": { slice_id: "slice-1", state: "work" } },
-        aggregates: {},
+      aggregates: {
+        per_project: { today_cost: 4.21, lifetime_cost: 342.16 },
+        per_slice: { "slice-3": { cost_usd: 0.41, ctx_pct: 73 } },
+        per_sprint: { "sprint-1": { cost_usd: 2.4, tokens: 1_000_000 } },
       },
-      1,
-    );
-    MockEventSource.lastInstance?.emit(
-      "state-update",
-      {
-        kind: "slice",
-        id: "sprint-A::slice-1",
-        delta: { slice_id: "slice-1", state: "pr" },
-      },
-      2,
-    );
-
-    expect(store.getState().slices["sprint-A::slice-1"]?.state).toBe("pr");
-    expect(store.getState().lastEventId).toBe(2);
-    es.stop();
-  });
-
-  it("flips to `slow` then `lost` as time-since-last-event grows", () => {
-    vi.useFakeTimers();
-    const store = createStore();
-    const es = new NamlEventSource(store, {
-      url: "/events",
-      EventSourceCtor: MockEventSource as unknown as typeof EventSource,
-      now: () => Date.now(),
-      syncTickMs: 10,
     });
-    es.start();
+    const state = store.getState();
+    expect(state.sprints["sprint-1"]?.state).toBe("executing");
+    expect(state.slices["slice-3"]?.title).toBe("Dashboard");
+    expect(state.project_metrics.today_cost).toBe(4.21);
+    expect(state.project_metrics.lifetime_cost).toBe(342.16);
+    expect(state.slice_metrics["slice-3"]?.ctx_pct).toBe(73);
+    expect(state.sprint_metrics["sprint-1"]?.tokens).toBe(1_000_000);
+  });
 
-    // First, get the store out of `connecting`.
-    MockEventSource.lastInstance?.emit("ping", { t: "x" }, 1);
-    expect(store.getState().syncStatus).toBe("connected");
+  it("state-update produces a transition record when the state changes", () => {
+    fakeEs.emit("snapshot", {
+      slices: {
+        "slice-4": {
+          id: "slice-4",
+          sprintId: "sprint-1",
+          title: "Stepper",
+          state: "work",
+          lane: 2,
+        },
+      },
+    });
+    fakeEs.emit("state-update", {
+      kind: "slice",
+      id: "slice-4",
+      delta: { state: "review" },
+    });
+    const state = store.getState();
+    expect(state.slices["slice-4"]?.state).toBe("review");
+    expect(state.transitions[0]).toMatchObject({
+      kind: "slice",
+      targetId: "slice-4",
+      fromState: "work",
+      toState: "review",
+    });
+  });
 
-    vi.advanceTimersByTime(SLOW_AFTER_MS + 50);
+  it("metric-tick updates project + slice + sprint rollups in place", () => {
+    fakeEs.emit("metric-tick", {
+      slice: "slice-4",
+      sprint: "sprint-1",
+      rollups: {
+        slice_cost: 0.43,
+        slice_tokens_in: 82140,
+        slice_ctx_pct: 75,
+        sprint_cost: 2.41,
+        sprint_tokens: 2_100_000,
+        project_today: 4.21,
+        project_week: 24.8,
+        project_30d: 118.42,
+        project_lifetime: 342.16,
+      },
+    });
+    const state = store.getState();
+    expect(state.project_metrics.today_cost).toBe(4.21);
+    expect(state.project_metrics.lifetime_cost).toBe(342.16);
+    expect(state.slice_metrics["slice-4"]?.cost_usd).toBe(0.43);
+    expect(state.sprint_metrics["sprint-1"]?.tokens).toBe(2_100_000);
+  });
+
+  it("derives `slow` after 5s and `lost` after 15s of silence", () => {
+    fakeEs.emit("snapshot", {});
+    expect(store.getState().syncStatus).toBe("live");
+    nowMs += SLOW_THRESHOLD_MS + 100;
+    client.deriveSync();
     expect(store.getState().syncStatus).toBe("slow");
-
-    vi.advanceTimersByTime(LOST_AFTER_MS);
-    expect(store.getState().syncStatus).toBe("lost");
-    es.stop();
-  });
-
-  it("notifies key subscribers when syncStatus changes", () => {
-    const { es, store } = makeES();
-    const seen: StoreState["syncStatus"][] = [];
-    store.subscribeKey("syncStatus", (status) => seen.push(status));
-    es.start();
-    MockEventSource.lastInstance?.emit("ping", { t: "x" }, 1);
-    expect(seen).toContain("connected");
-    es.stop();
-  });
-
-  it("stop() closes the underlying connection and marks lost", () => {
-    const { es, store } = makeES();
-    es.start();
-    const inner = MockEventSource.lastInstance;
-    es.stop();
-    expect(inner?.closed).toBe(true);
+    nowMs += LOST_THRESHOLD_MS;
+    client.deriveSync();
     expect(store.getState().syncStatus).toBe("lost");
   });
 
-  it("forceReconnect closes the current ES and opens a fresh one", () => {
-    const { es } = makeES();
-    es.start();
-    const first = MockEventSource.lastInstance;
-    es.forceReconnect();
-    const second = MockEventSource.lastInstance;
-    expect(first?.closed).toBe(true);
-    expect(second).not.toBe(first);
-    es.stop();
+  it("bumps reconnect attempts on error", () => {
+    expect(store.getState().reconnectAttempt).toBe(0);
+    if (fakeEs.onerror) fakeEs.onerror(new Event("error"));
+    if (fakeEs.onerror) fakeEs.onerror(new Event("error"));
+    expect(store.getState().reconnectAttempt).toBe(2);
   });
 
-  it("drops malformed payloads instead of throwing", () => {
-    const { es, store } = makeES();
-    es.start();
-    // Pass already-stringified garbage that won't parse as JSON.
-    MockEventSource.lastInstance?.emit("state-update", "{not-json", 1);
-    // Store should not have been touched (no slices recorded).
-    expect(Object.keys(store.getState().slices)).toHaveLength(0);
-    es.stop();
+  it("stop() closes the underlying socket", () => {
+    client.stop();
+    expect(fakeEs.closed).toBe(true);
+  });
+
+  it("holds CONNECTING after `onopen` until the first event arrives", () => {
+    // start() already called in beforeEach.
+    expect(store.getState().syncStatus).toBe("connecting");
+    if (fakeEs.onopen) fakeEs.onopen(new Event("open"));
+    expect(store.getState().syncStatus).toBe("connecting");
+    expect(store.getState().reconnectAttempt).toBe(0);
+    // First real event flips us to live.
+    fakeEs.emit("ping", { t: "2026-05-20T00:00:00Z" });
+    expect(store.getState().syncStatus).toBe("live");
   });
 });
