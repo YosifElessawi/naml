@@ -1,0 +1,169 @@
+{
+  "project": {
+    "name": "inpolicy/web",
+    "state": "ACTIVE",
+    "branch": "main",
+    "lanes": 3,
+    "sprintsShipped": 14,
+    "lastMergeMinutesAgo": 22,
+    "dailyBurn7dAvgDollars": 5.92
+  },
+  "cost": {
+    "today": {
+      "dollars": 4.21,
+      "tokens": "9.2M",
+      "delta": "+18% vs yesterday",
+      "deltaDirection": "up"
+    },
+    "thisWeek": {
+      "dollars": 24.8,
+      "tokens": "56M",
+      "delta": "-12% vs last wk",
+      "deltaDirection": "down"
+    },
+    "last30d": {
+      "dollars": 118.42,
+      "tokens": "218M"
+    },
+    "lifetime": {
+      "dollars": 342.16,
+      "since": "2026-03-14"
+    }
+  },
+  "health": [
+    {
+      "label": "TIER-1 · 7d",
+      "value": "78%",
+      "tone": "ok",
+      "trend": "+4 pp ↗",
+      "trendTone": "up"
+    },
+    {
+      "label": "AVG SPRINT",
+      "value": "37m",
+      "trend": "-3m ↘",
+      "trendTone": "up"
+    },
+    {
+      "label": "SPRINTS / WK",
+      "value": "5",
+      "trend": "±0"
+    },
+    {
+      "label": "SLICE FAIL",
+      "value": "5.6%",
+      "tone": "warn",
+      "alert": true,
+      "trend": "+1.2 pp ↗",
+      "trendTone": "dn"
+    },
+    {
+      "label": "LGTM 1ST",
+      "value": "82%",
+      "tone": "ok",
+      "trend": "+2 pp",
+      "trendTone": "up"
+    },
+    {
+      "label": "REVIEW ITER",
+      "value": "1.2",
+      "trend": "stable"
+    }
+  ],
+  "healthTertiary": [
+    { "label": "$ / SPRINT AVG", "value": "$1.84", "trend": "p95 $3.92" },
+    { "label": "$ / MERGED PR", "value": "$0.42" },
+    { "label": "TTFP MEDIAN", "value": "2m 40s" },
+    { "label": "RETRY RATE", "value": "11%" },
+    { "label": "PEAK CTX AVG", "value": "58%" },
+    { "label": "DAG UTIL", "value": "86%" }
+  ],
+  "sprints": {
+    "active": [
+      {
+        "id": "2026-05-19-html-renderer",
+        "title": "2026-05-19-html-renderer",
+        "subtitle": "started 21m ago · 3 lanes active",
+        "state": "executing",
+        "stateLabel": "EXECUTING",
+        "slices": ["merged", "merged", "review", "work", "work", "idle", "idle", "idle"],
+        "metaTopRight": "slices 5/8",
+        "metaBottomRight": "cost $2.41",
+        "openLabel": "OPEN →"
+      }
+    ],
+    "queued": [
+      {
+        "id": "2026-05-20-eval-harness",
+        "title": "2026-05-20-eval-harness",
+        "titleSuffix": "↳ feedback",
+        "subtitle": "parent: html-renderer · 3 slices",
+        "state": "planned",
+        "stateLabel": "PLANNED",
+        "slices": ["idle", "idle", "idle", "idle"],
+        "metaTopRight": "est ~14m",
+        "openLabel": "OPEN →"
+      },
+      {
+        "id": "2026-05-21-policy-validator",
+        "title": "2026-05-21-policy-validator",
+        "subtitle": "greenfield · 6 slices",
+        "state": "planned",
+        "stateLabel": "PLANNED",
+        "slices": ["idle", "idle", "idle", "idle", "idle", "idle"],
+        "metaTopRight": "est ~32m",
+        "openLabel": "OPEN →"
+      }
+    ],
+    "recent": [
+      {
+        "id": "2026-05-18-config-rename",
+        "title": "2026-05-18-config-rename",
+        "subtitle": "5 slices · 28m",
+        "state": "complete",
+        "stateLabel": "COMPLETE",
+        "slices": ["merged", "merged", "merged", "merged", "merged"],
+        "metaTopRight": "tier-1 5/5",
+        "openLabel": "VIEW →"
+      },
+      {
+        "id": "2026-05-17-feedback-skill",
+        "title": "2026-05-17-feedback-skill",
+        "subtitle": "3 slices · 19m",
+        "state": "complete",
+        "stateLabel": "COMPLETE",
+        "slices": ["merged", "merged", "merged"],
+        "metaTopRight": "tier-1 3/3",
+        "openLabel": "VIEW →"
+      },
+      {
+        "id": "2026-05-16-merger-tier1",
+        "title": "2026-05-16-merger-tier1",
+        "subtitle": "7 slices · 41m",
+        "state": "complete",
+        "stateLabel": "COMPLETE",
+        "slices": ["merged", "merged", "merged", "merged", "merged", "merged", "merged"],
+        "metaTopRight": "tier-1 6/7",
+        "openLabel": "VIEW →"
+      }
+    ]
+  },
+  "inbox": {
+    "unfiled": 4,
+    "link": "/grill-feedback →",
+    "bullets": [
+      {
+        "text": "Slider doesn't snap to grid values.",
+        "source": "2026-05-19 · target: html-renderer"
+      },
+      {
+        "text": "HTML output uses <b> instead of <strong>.",
+        "source": "2026-05-19 · target: html-renderer"
+      },
+      {
+        "text": "API response missing created_at.",
+        "source": "2026-05-18 · target: html-renderer"
+      }
+    ]
+  }
+}
