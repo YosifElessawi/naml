@@ -197,11 +197,15 @@ class Scheduler:
           dependents propagate to ``blocked_upstream``. The lane never
           re-runs it (the user must ``naml retry`` first).
         - In-flight non-terminal state (``setup``, ``work``, ``pr``,
-          ``review``, ``merging``, etc.) → warn on stderr that the
-          orchestrator likely died mid-attempt, then treat the slice as
-          FAILED for the purposes of this run so its in-progress worktree
-          is not clobbered by a silent re-attempt. The user must explicitly
-          run ``naml retry`` (or ``naml recover``) to recover.
+          ``review``, ``merging``, etc.) → **auto-recover**. Reset to
+          ``pending`` on disk (clearing ``session_id`` so Claude doesn't
+          reject a re-used UUID, and ``attempts`` so the slice gets a
+          full retry budget), record a transition row noting the orphan,
+          and let the lane pop it normally. The previous orchestrator is
+          guaranteed dead — only one ``naml run`` owns a sprint at a time
+          and the SIGINT/SIGTERM handler in ``naml.run`` guarantees Claude
+          subprocesses are reaped before exit — so there is nothing to
+          race with.
 
         Slices with no status file are left as pending — they'll be picked
         up by lanes normally.
@@ -223,21 +227,50 @@ class Scheduler:
                 # lane pick it up normally.
                 continue
             else:
-                # In-flight or otherwise non-terminal. The previous naml
-                # run died mid-attempt; we don't know if a Claude session
-                # is still bound to the old session_id, and re-popping
-                # would race with whatever's still on disk in the worktree.
-                # Treat as failed for this run and tell the user how to
-                # recover.
-                print(
-                    f"naml: slice {sid} is in state {status.state!r} — "
-                    f"orchestrator may have died mid-attempt; run "
-                    f"`naml retry <sprint-dir> {sid}` to reset or "
-                    f"`naml recover` to inspect. Treating as failed for "
-                    f"this run; dependents will be blocked_upstream.",
-                    file=sys.stderr,
-                )
-                self._absorb_terminal_locked(sid, done=False)
+                # Orphan: non-terminal on-disk state with no live process
+                # owning it. The previous naml run died (kill -9, crash,
+                # pre-safe-pause Ctrl-C) before the lane could transition
+                # the slice to a terminal state. Auto-recover by resetting
+                # to ``pending`` so this run picks it up normally — equivalent
+                # to the user having run ``naml retry <sid>`` before this run.
+                self._recover_orphan_locked(sprint_root, sid, status)
+
+    def _recover_orphan_locked(
+        self,
+        sprint_root: Path,
+        slice_id: str,
+        status: "state_mod.SliceStatus",
+    ) -> None:
+        """Persist orphan recovery to disk and leave the in-memory scheduler
+        state at ``pending`` (its default) so the lane pops the slice via
+        the normal ready-set mechanic. Idempotent; safe to re-run if a
+        future startup re-encounters the same orphan."""
+        previous = status.state
+        session_preview = (
+            status.session_id[:8] + "…" if status.session_id else "none"
+        )
+        print(
+            f"naml: slice {slice_id} was orphaned in state {previous!r} — "
+            f"auto-recovering to pending for re-run; previous session_id "
+            f"({session_preview}) discarded",
+            file=sys.stderr,
+        )
+        status.state = states.PENDING
+        status.attempts = {}
+        # Wipe session_id — Claude rejects a re-used consumed UUID with
+        # "Session ID is already in use". The lane generates a fresh one
+        # on the next claim.
+        status.session_id = ""
+        status.last_error = ""
+        status.record_transition(
+            state=states.PENDING,
+            detail=f"orphaned in {previous!r} by previous run — auto-recovered",
+        )
+        state_mod.save_slice_status(sprint_root, status)
+        # In-memory scheduler state stays at whatever ``__init__`` set
+        # (``pending`` or ``ready`` depending on deps). No further action
+        # needed — when predecessors get marked ``done`` later in this loop,
+        # ``_reevaluate_ready_locked`` promotes orphan recoverees to ``ready``.
 
     def _absorb_terminal_locked(self, slice_id: str, *, done: bool) -> None:
         """Force a slice into ``done``/``failed`` without going through

@@ -7,10 +7,12 @@ status files (e.g. from a prior partial run), the scheduler must:
   releasing their dependents.
 - Treat slices whose state is in ``LANE_FAILED_STATES`` as failed,
   blocking their descendants.
-- Refuse to silently re-pop slices stuck in a mid-attempt state
-  (``setup``, ``work``, ``pr``, ``review``, ``merging``…). Those get a
-  stderr warning and are treated as failed so the user is forced to
-  explicitly run ``naml retry``.
+- Auto-recover slices stuck in a mid-attempt state (``setup``, ``work``,
+  ``pr``, ``review``, ``merging``…) by resetting them to ``pending`` on
+  disk so the lane picks them up normally. The previous orchestrator is
+  guaranteed dead — only one ``naml run`` owns a sprint at a time, and
+  the SIGINT/SIGTERM handler in ``naml.run`` reaps Claude subprocesses
+  before exit — so there is nothing to race with.
 - Leave slices with no status file as pending — normal popping.
 """
 
@@ -124,10 +126,12 @@ class AbsorbExistingStatusesTests(unittest.TestCase):
         self.assertEqual(snap["slice-1"], "failed")
         self.assertEqual(snap["slice-2"], "blocked_upstream")
 
-    # --- in-flight (orchestrator-died) protection ------------------------
+    # --- in-flight (orchestrator-died) auto-recovery ---------------------
 
-    def test_in_flight_state_warns_and_treats_as_failed(self) -> None:
-        # state=work — orchestrator died mid-implementer.
+    def test_in_flight_work_state_auto_recovers_to_pending(self) -> None:
+        # state=work on disk — orchestrator died mid-implementer.
+        # The scheduler should reset to PENDING on disk so the lane pops
+        # it normally this run.
         _write_status(self._sprint_root, "slice-1", states_mod.WORK)
         sched = Scheduler(self._sprint)
         sched.preflight()
@@ -136,23 +140,90 @@ class AbsorbExistingStatusesTests(unittest.TestCase):
             sched.absorb_existing_statuses(self._sprint_root)
         warning = err.getvalue()
         self.assertIn("slice-1", warning)
-        self.assertIn("work", warning)
-        self.assertIn("naml retry", warning)
-        # Treated as failed for this run.
-        snap = sched.snapshot()
-        self.assertEqual(snap["slice-1"], "failed")
-        self.assertEqual(snap["slice-2"], "blocked_upstream")
-        self.assertEqual(snap["slice-3"], "blocked_upstream")
+        self.assertIn("orphan", warning.lower())
+        # On-disk state was rewritten to pending.
+        reloaded = state_mod.load_slice_status(self._sprint_root, "slice-1")
+        self.assertIsNotNone(reloaded)
+        assert reloaded is not None  # narrow for type checker
+        self.assertEqual(reloaded.state, states_mod.PENDING)
+        # In-memory scheduler state stays at its initial ``ready`` (no deps).
+        self.assertEqual(sched.slice_status("slice-1"), "ready")
+        # Dependents are not blocked — they'll be released when slice-1
+        # actually completes this run.
+        self.assertEqual(sched.slice_status("slice-2"), "pending")
 
-    def test_in_flight_setup_state_also_blocks(self) -> None:
+    def test_in_flight_setup_state_also_recovers(self) -> None:
         _write_status(self._sprint_root, "slice-1", states_mod.SETUP)
         sched = Scheduler(self._sprint)
         sched.preflight()
         err = io.StringIO()
         with redirect_stderr(err):
             sched.absorb_existing_statuses(self._sprint_root)
-        self.assertIn("setup", err.getvalue())
-        self.assertEqual(sched.slice_status("slice-1"), "failed")
+        self.assertIn("orphan", err.getvalue().lower())
+        reloaded = state_mod.load_slice_status(self._sprint_root, "slice-1")
+        assert reloaded is not None
+        self.assertEqual(reloaded.state, states_mod.PENDING)
+        self.assertEqual(sched.slice_status("slice-1"), "ready")
+
+    def test_orphan_recovery_clears_session_and_attempts(self) -> None:
+        # Seed a status file that looks like a real mid-work orphan with
+        # a session_id and a recorded attempt — the kind ``naml retry``
+        # would normally clear.
+        state_mod.ensure_state_dir(self._sprint_root)
+        status = state_mod.SliceStatus(
+            slice_id="slice-1",
+            state=states_mod.WORK,
+            session_id="abc-123-def",
+            attempts={"work": 1},
+            last_error="something old",
+        )
+        status.record_transition(state=states_mod.SETUP, detail="")
+        status.record_transition(state=states_mod.WORK, detail="")
+        state_mod.save_slice_status(self._sprint_root, status)
+
+        sched = Scheduler(self._sprint)
+        sched.preflight()
+        with redirect_stderr(io.StringIO()):
+            sched.absorb_existing_statuses(self._sprint_root)
+
+        reloaded = state_mod.load_slice_status(self._sprint_root, "slice-1")
+        assert reloaded is not None
+        self.assertEqual(reloaded.state, states_mod.PENDING)
+        # session_id wiped (Claude rejects re-used UUIDs)
+        self.assertEqual(reloaded.session_id, "")
+        # attempts cleared (full retry budget restored)
+        self.assertEqual(reloaded.attempts, {})
+        # last_error cleared
+        self.assertEqual(reloaded.last_error, "")
+        # transition row recorded so the timeline shows what happened
+        last = reloaded.transitions[-1]
+        self.assertEqual(last.state, states_mod.PENDING)
+        self.assertIn("orphan", last.detail.lower())
+
+    def test_orphan_recovery_is_idempotent_across_calls(self) -> None:
+        # Two ``naml run`` invocations against the same orphan should both
+        # succeed — the second call sees the slice already at PENDING and
+        # treats it as the fresh-slate path (no extra orphan transitions).
+        _write_status(self._sprint_root, "slice-1", states_mod.WORK)
+
+        sched1 = Scheduler(self._sprint)
+        sched1.preflight()
+        with redirect_stderr(io.StringIO()):
+            sched1.absorb_existing_statuses(self._sprint_root)
+        after_first = state_mod.load_slice_status(self._sprint_root, "slice-1")
+        assert after_first is not None
+        n_transitions = len(after_first.transitions)
+
+        sched2 = Scheduler(self._sprint)
+        sched2.preflight()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            sched2.absorb_existing_statuses(self._sprint_root)
+        # No new warning — slice is now pending, treated as fresh-slate.
+        self.assertEqual(err.getvalue(), "")
+        after_second = state_mod.load_slice_status(self._sprint_root, "slice-1")
+        assert after_second is not None
+        self.assertEqual(len(after_second.transitions), n_transitions)
 
     # --- mixed --------------------------------------------------------
 
