@@ -87,6 +87,7 @@ class Scheduler:
         self.overlap_policy = overlap_policy
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
+        self._shutdown = False
 
         # Build the working schedule out of the sprint's slices. The
         # depends_on list is mutable: pre-flight may add forced edges.
@@ -259,10 +260,13 @@ class Scheduler:
 
         With ``blocking=True`` (default), waits on the condition variable
         until either a slice becomes ready or all work is finished. With
-        ``blocking=False``, returns immediately.
+        ``blocking=False``, returns immediately. Returns ``None`` as soon
+        as ``shutdown()`` is called, even if work remains.
         """
         with self._cond:
             while True:
+                if self._shutdown:
+                    return None
                 ready = [sid for sid, s in self._slices.items() if s.status == "ready"]
                 if ready:
                     # Take the manifest-order earliest ready slice. Stable.
@@ -277,6 +281,21 @@ class Scheduler:
                     return None
                 # Wait for state changes.
                 self._cond.wait(timeout=timeout)
+
+    def shutdown(self) -> None:
+        """Drain stop: any blocked ``pop_ready()`` returns ``None`` immediately
+        and no further pops succeed. Slices already ``in_flight`` are not
+        touched — caller is responsible for letting them finish (or killing
+        their subprocesses explicitly). Used by the SIGINT pause handler in
+        ``naml.run`` to unblock workers waiting for new work.
+        """
+        with self._cond:
+            self._shutdown = True
+            self._cond.notify_all()
+
+    def is_shutdown(self) -> bool:
+        with self._lock:
+            return self._shutdown
 
     def mark_done(self, slice_id: str) -> None:
         with self._cond:

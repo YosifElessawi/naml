@@ -137,6 +137,39 @@ def _kill_group(proc: subprocess.Popen) -> None:
             continue
 
 
+# Active-lane registry — every live Claude subprocess spawned by this naml
+# process is recorded here while running. The SIGINT-twice ``hard pause``
+# handler in ``naml.run`` iterates this set and ``_kill_group``s each entry.
+# Lane workers see their subprocess die and write a ``failed`` status with
+# ``last_error="paused mid-work (SIGINT)"`` via the normal post-wait path.
+_active_procs_lock = threading.Lock()
+_active_procs: set[subprocess.Popen] = set()
+
+
+def _register_active_lane(proc: subprocess.Popen) -> None:
+    with _active_procs_lock:
+        _active_procs.add(proc)
+
+
+def _unregister_active_lane(proc: subprocess.Popen) -> None:
+    with _active_procs_lock:
+        _active_procs.discard(proc)
+
+
+def terminate_all_active_lanes() -> int:
+    """SIGTERM (then SIGKILL) every Claude subprocess this naml process spawned.
+
+    Returns the count of subprocesses signalled. Idempotent — already-dead
+    procs are skipped by ``_kill_group``. Called by ``naml.run``'s
+    SIGINT-twice handler for the hard-pause path.
+    """
+    with _active_procs_lock:
+        snapshot = list(_active_procs)
+    for proc in snapshot:
+        _kill_group(proc)
+    return len(snapshot)
+
+
 def _parse_final_result(log_path: Path, start_offset: int) -> dict | None:
     """Return the final ``type=result`` event in the log slice, or None."""
     try:
@@ -215,6 +248,7 @@ def _spawn(
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
+        _register_active_lane(proc)
         return proc, start_offset, None
 
     proc = subprocess.Popen(  # noqa: S603 — argv constructed, not a shell string
@@ -229,6 +263,7 @@ def _spawn(
         encoding="utf-8",
         errors="replace",
     )
+    _register_active_lane(proc)
     thread = threading.Thread(
         target=_tee_stdout,
         args=(proc.stdout, log_path, emitter),
@@ -460,24 +495,27 @@ def run_implementer(
         header_label=label,
         emitter=emitter,
     )
-    completed, timed_out, exit_code = _wait_under_cap(
-        proc,
-        log_path=log_path,
-        start_offset=start_offset,
-        cap_minutes=cap_minutes,
-        label=label,
-    )
-    # Drain the tee thread so the last bytes (incl. the final type:result
-    # event) are in the log before we parse usage.
-    if reader is not None:
-        reader.join(timeout=5)
-    usage = _usage_from(_parse_final_result(log_path, start_offset))
-    return RunResult(
-        completed=completed,
-        timed_out=timed_out,
-        exit_code=exit_code,
-        usage=usage,
-    )
+    try:
+        completed, timed_out, exit_code = _wait_under_cap(
+            proc,
+            log_path=log_path,
+            start_offset=start_offset,
+            cap_minutes=cap_minutes,
+            label=label,
+        )
+        # Drain the tee thread so the last bytes (incl. the final type:result
+        # event) are in the log before we parse usage.
+        if reader is not None:
+            reader.join(timeout=5)
+        usage = _usage_from(_parse_final_result(log_path, start_offset))
+        return RunResult(
+            completed=completed,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            usage=usage,
+        )
+    finally:
+        _unregister_active_lane(proc)
 
 
 def run_reviewer(
@@ -510,26 +548,29 @@ def run_reviewer(
         cap_minutes=cap_minutes,
         header_label="REVIEW (fresh session)",
     )
-    completed, timed_out, exit_code = _wait_under_cap(
-        proc,
-        log_path=log_path,
-        start_offset=start_offset,
-        cap_minutes=cap_minutes,
-        label="REVIEW",
-    )
-    final = _parse_final_result(log_path, start_offset)
-    text = ""
-    if final:
-        raw = final.get("result")
-        if isinstance(raw, str):
-            text = raw
-    return RunResult(
-        completed=completed,
-        timed_out=timed_out,
-        exit_code=exit_code,
-        usage=_usage_from(final),
-        final_text=text,
-    )
+    try:
+        completed, timed_out, exit_code = _wait_under_cap(
+            proc,
+            log_path=log_path,
+            start_offset=start_offset,
+            cap_minutes=cap_minutes,
+            label="REVIEW",
+        )
+        final = _parse_final_result(log_path, start_offset)
+        text = ""
+        if final:
+            raw = final.get("result")
+            if isinstance(raw, str):
+                text = raw
+        return RunResult(
+            completed=completed,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            usage=_usage_from(final),
+            final_text=text,
+        )
+    finally:
+        _unregister_active_lane(proc)
 
 
 def run_merger(
@@ -565,26 +606,29 @@ def run_merger(
         cap_minutes=cap_minutes,
         header_label="MERGER (fresh session)",
     )
-    completed, timed_out, exit_code = _wait_under_cap(
-        proc,
-        log_path=log_path,
-        start_offset=start_offset,
-        cap_minutes=cap_minutes,
-        label="MERGER",
-    )
-    final = _parse_final_result(log_path, start_offset)
-    text = ""
-    if final:
-        raw = final.get("result")
-        if isinstance(raw, str):
-            text = raw
-    return RunResult(
-        completed=completed,
-        timed_out=timed_out,
-        exit_code=exit_code,
-        usage=_usage_from(final),
-        final_text=text,
-    )
+    try:
+        completed, timed_out, exit_code = _wait_under_cap(
+            proc,
+            log_path=log_path,
+            start_offset=start_offset,
+            cap_minutes=cap_minutes,
+            label="MERGER",
+        )
+        final = _parse_final_result(log_path, start_offset)
+        text = ""
+        if final:
+            raw = final.get("result")
+            if isinstance(raw, str):
+                text = raw
+        return RunResult(
+            completed=completed,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            usage=_usage_from(final),
+            final_text=text,
+        )
+    finally:
+        _unregister_active_lane(proc)
 
 
 def parse_verdict(text: str) -> str:

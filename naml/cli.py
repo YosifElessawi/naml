@@ -550,6 +550,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
         ],
     }
     print(json.dumps(payload, indent=2))
+    if report.aggregate_state == "paused":
+        print(
+            f"\nnaml: sprint {report.sprint_id} paused. "
+            f"Re-run `naml run {args.sprint_dir}` to resume from where this left off.",
+            file=sys.stderr,
+        )
+        return 0
     return 0 if report.aggregate_state not in {"failed"} else 1
 
 

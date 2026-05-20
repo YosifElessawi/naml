@@ -21,11 +21,13 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import signal
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from . import claude as claude_mod
 from .config import Gate, NamlConfig
 from . import lane as lane_mod
 from .package import Sprint
@@ -47,6 +49,103 @@ class GatePreflightError(RuntimeError):
 log = logging.getLogger("naml.run")
 
 
+# --- pause / resume plumbing -------------------------------------------
+#
+# Signal model:
+# - SIGINT once (Ctrl-C in the foreground terminal): set ``_pause_requested``,
+#   call ``scheduler.shutdown()`` so workers blocked in ``pop_ready`` wake
+#   up and exit cleanly. In-flight slices keep running their Claude
+#   subprocess to its natural end — that's the drain.
+# - SIGINT again, or SIGTERM at any point: set ``_kill_requested``,
+#   ``terminate_all_active_lanes()`` to SIGTERM live Claude subprocesses.
+#   Each lane's ``_wait_under_cap`` returns; the lane writes a ``failed``
+#   status; the worker exits its loop on the next ``pop_ready``.
+# - Either way, ``run_sprint`` finishes by writing project state ``paused``
+#   instead of ``awaiting_human``. ``naml run`` against a paused project
+#   logs "resumed from pause" and picks up exactly where it left off via
+#   the existing ``Scheduler.absorb_existing_statuses`` flow.
+#
+# Claude subprocesses are spawned with ``start_new_session=True`` so they
+# do NOT share a process group with naml — a terminal Ctrl-C reaches naml
+# only, leaving the live Claude session untouched until naml decides what
+# to do with it. That's the precondition that makes drain mode work.
+
+_pause_requested = threading.Event()
+_kill_requested = threading.Event()
+_current_scheduler: Scheduler | None = None
+
+
+def _handle_pause_signal(signum: int, _frame: object) -> None:
+    """Top-level signal handler. Installed by ``run_sprint`` for SIGINT and
+    SIGTERM; restored on exit so other commands (``naml status``,
+    ``naml retry``) keep their default Python handling.
+    """
+    if signum == signal.SIGTERM or _pause_requested.is_set():
+        # SIGTERM → hard pause immediately. Second SIGINT → escalate.
+        if not _kill_requested.is_set():
+            _kill_requested.set()
+            log.warning(
+                "naml: hard pause (signal %d) — terminating live Claude lanes; "
+                "in-flight slices will be marked failed",
+                signum,
+            )
+            try:
+                n = claude_mod.terminate_all_active_lanes()
+            except Exception:  # noqa: BLE001 — last-line defence; signal handler must not raise
+                log.exception("terminate_all_active_lanes() failed")
+                n = 0
+            log.warning("naml: signalled %d active Claude subprocess(es)", n)
+            sched = _current_scheduler
+            if sched is not None and not sched.is_shutdown():
+                sched.shutdown()
+        return
+
+    # First SIGINT — soft drain.
+    _pause_requested.set()
+    log.warning(
+        "naml: pause requested (signal %d) — draining lanes. "
+        "Ctrl-C again to force-stop (kills in-flight slices).",
+        signum,
+    )
+    sched = _current_scheduler
+    if sched is not None:
+        sched.shutdown()
+
+
+def _install_signal_handlers() -> tuple[object, object] | None:
+    """Install pause handlers if we're on the main thread. Returns the
+    previous (SIGINT, SIGTERM) handlers for later restoration, or ``None``
+    when handlers can't be installed (signal.signal raises off the main
+    thread, and some embedded environments reject it altogether)."""
+    if threading.current_thread() is not threading.main_thread():
+        return None
+    try:
+        prev_int = signal.signal(signal.SIGINT, _handle_pause_signal)
+        prev_term = signal.signal(signal.SIGTERM, _handle_pause_signal)
+    except (ValueError, OSError):
+        return None
+    return prev_int, prev_term
+
+
+def _restore_signal_handlers(prev: tuple[object, object] | None) -> None:
+    if prev is None:
+        return
+    prev_int, prev_term = prev
+    try:
+        signal.signal(signal.SIGINT, prev_int)
+        signal.signal(signal.SIGTERM, prev_term)
+    except (ValueError, OSError):
+        pass
+
+
+def _reset_pause_state() -> None:
+    """Clear pause flags so a subsequent ``run_sprint`` in the same process
+    starts clean. The CLI always exits after one run; only tests rely on this.
+    """
+    _pause_requested.clear()
+    _kill_requested.clear()
+
+
 _DEFAULT_LOG_ROOT = Path.home() / "Library" / "Logs" / "naml"
 
 
@@ -55,7 +154,7 @@ class RunReport:
     sprint_id: str
     lanes_effective: int
     per_slice_state: dict[str, str]
-    aggregate_state: str            # complete | partial_failure | failed | awaiting_signoff
+    aggregate_state: str            # complete | partial_failure | failed | awaiting_signoff | paused
     overlap_findings: list[tuple[str, str, str, str]]
 
 
@@ -286,45 +385,78 @@ def run_sprint(
                 # Anything in LANE_DONE_STATES releases dependents.
                 scheduler.mark_done(slice_id)
 
-    threads: list[threading.Thread] = []
-    for i in range(lane_count_resolved):
-        t = threading.Thread(target=_worker, args=(i + 1,), daemon=False,
-                             name=f"naml-lane-{i + 1}")
-        t.start()
-        threads.append(t)
-    for t in threads:
-        t.join()
+    # Install SIGINT/SIGTERM handlers so Ctrl-C drains lanes cleanly and a
+    # second Ctrl-C (or SIGTERM) escalates to a hard kill that SIGTERMs
+    # live Claude subprocesses. Handlers are restored in the ``finally``
+    # below so commands other than ``naml run`` keep default signal handling.
+    global _current_scheduler  # noqa: PLW0603 — module-level handler state
+    _reset_pause_state()
+    prev_handlers = _install_signal_handlers()
+    _current_scheduler = scheduler
 
-    snapshot = scheduler.snapshot()
-    per_slice: dict[str, str] = {}
-    for sid in (s.id for s in sprint.slices):
-        status = state_mod.load_slice_status(sprint_root, sid)
-        per_slice[sid] = status.state if status else snapshot.get(sid, "pending")
+    try:
+        threads: list[threading.Thread] = []
+        for i in range(lane_count_resolved):
+            t = threading.Thread(target=_worker, args=(i + 1,), daemon=False,
+                                 name=f"naml-lane-{i + 1}")
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
 
-    aggregate = _aggregate_state(per_slice, stop_after)
-    if aggregate != sprint_state.state:
-        sprint_state.state = aggregate
-        ok_count = sum(
-            1 for s in per_slice.values() if s in states.LANE_DONE_STATES
+        snapshot = scheduler.snapshot()
+        per_slice: dict[str, str] = {}
+        for sid in (s.id for s in sprint.slices):
+            status = state_mod.load_slice_status(sprint_root, sid)
+            per_slice[sid] = status.state if status else snapshot.get(sid, "pending")
+
+        paused = _pause_requested.is_set()
+        hard_paused = _kill_requested.is_set()
+
+        if paused:
+            # Don't roll an aggregate verdict — the sprint is incomplete by
+            # design. Leave sprint_state.state at SPRINT_EXECUTING so the
+            # next ``naml run`` resumes naturally; just record a "paused"
+            # transition row on the sprint timeline for visibility.
+            pause_mode = "forced" if hard_paused else "drain"
+            sprint_state.record_transition(
+                state=sprint_state.state,
+                detail=f"run interrupted ({pause_mode} pause)",
+            )
+            sprint_state.slices = per_slice
+            state_mod.save_sprint_state(sprint_root, sprint_state)
+            aggregate = "paused"
+            project_state_mod.on_sprint_paused(
+                project_naml, sprint.id, mode=pause_mode
+            )
+        else:
+            aggregate = _aggregate_state(per_slice, stop_after)
+            if aggregate != sprint_state.state:
+                sprint_state.state = aggregate
+                ok_count = sum(
+                    1 for s in per_slice.values() if s in states.LANE_DONE_STATES
+                )
+                fail_count = sum(
+                    1 for s in per_slice.values() if s in states.LANE_FAILED_STATES
+                )
+                sprint_state.record_transition(
+                    state=aggregate,
+                    detail=f"{ok_count}/{len(per_slice)} slices clear; "
+                           f"{fail_count} need attention",
+                )
+            sprint_state.slices = per_slice
+            state_mod.save_sprint_state(sprint_root, sprint_state)
+            project_state_mod.on_sprint_run_finished(
+                project_naml, sprint.id, aggregate_state=aggregate
+            )
+
+        return RunReport(
+            sprint_id=sprint.id,
+            lanes_effective=lane_count_resolved,
+            per_slice_state=per_slice,
+            aggregate_state=aggregate,
+            overlap_findings=list(scheduler.preflight_findings),
         )
-        fail_count = sum(
-            1 for s in per_slice.values() if s in states.LANE_FAILED_STATES
-        )
-        sprint_state.record_transition(
-            state=aggregate,
-            detail=f"{ok_count}/{len(per_slice)} slices clear; {fail_count} need attention",
-        )
-    sprint_state.slices = per_slice
-    state_mod.save_sprint_state(sprint_root, sprint_state)
-
-    project_state_mod.on_sprint_run_finished(
-        project_naml, sprint.id, aggregate_state=aggregate
-    )
-
-    return RunReport(
-        sprint_id=sprint.id,
-        lanes_effective=lane_count_resolved,
-        per_slice_state=per_slice,
-        aggregate_state=aggregate,
-        overlap_findings=list(scheduler.preflight_findings),
-    )
+    finally:
+        _current_scheduler = None
+        _restore_signal_handlers(prev_handlers)

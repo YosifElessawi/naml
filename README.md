@@ -102,6 +102,22 @@ to stop via `[pipeline] stop_after` in the TOML (or `AO_STOP_AFTER=...`):
 `auto_review = true` (or `AO_AUTO_REVIEW=1`) runs the review BEFORE merge
 even when `stop_after = "merge"` — useful as a safety net.
 
+## Pausing a run
+
+`naml run` listens for `SIGINT` (Ctrl-C) and `SIGTERM`.
+
+- **First Ctrl-C** — drain mode. No new slices are spawned; in-flight slices
+  keep running to their natural end (PR open, review verdict, etc). Once
+  drained, the project transitions to `paused`.
+- **Second Ctrl-C** (or `SIGTERM`) — hard pause. Live Claude lane
+  subprocesses are SIGTERM'd; affected slices are marked `failed`. Use
+  this when you can't wait for in-flight slices to finish.
+
+Either way, the next `naml run <sprint-dir>` against the same sprint logs
+"resumed from pause" and picks up exactly where it left off. Slices that
+were already `review_passed`/`merged` are skipped; slices that were
+killed mid-work need a `naml retry <sprint-dir> <slice-id>` first.
+
 ## Batching
 
 Issues whose labels start with `batch:<id>` (e.g. `batch:auth-flow`) are
