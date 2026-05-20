@@ -1,8 +1,12 @@
 import { lanesFixture } from "./fixture.ts";
 import type { GanttBlock, GanttGhost, LaneCard, LaneTrack, LanesData, QueueChip } from "./types.ts";
+import { useLanesLive } from "./useLanesLive.ts";
 import "./Lanes.css";
 
 export interface LanesProps {
+  /** Pre-shaped payload for tests / playground; omit to subscribe to
+   *  the live store (falls back to the fixture if the store has no
+   *  current sprint yet). */
   data?: LanesData;
 }
 
@@ -144,7 +148,9 @@ function ChipEl({ chip }: { chip: QueueChip }) {
   );
 }
 
-export function Lanes({ data = lanesFixture }: LanesProps) {
+export function Lanes({ data: injected }: LanesProps = {}) {
+  const live = useLanesLive();
+  const data = injected ?? live ?? lanesFixture;
   return (
     <section className="naml-lanes" aria-label="Lanes view">
       <div className="naml-lanes__tag">TIME · gantt by lane</div>

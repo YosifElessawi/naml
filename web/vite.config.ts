@@ -18,6 +18,9 @@ export default defineConfig({
       "/healthz": "http://127.0.0.1:8765",
       "/state": "http://127.0.0.1:8765",
       "/intervene": "http://127.0.0.1:8765",
+      "/config": "http://127.0.0.1:8765",
+      "/events": "http://127.0.0.1:8765",
+      "/aggregates": "http://127.0.0.1:8765",
     },
   },
   build: {

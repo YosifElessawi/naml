@@ -7,6 +7,7 @@ import {
   type SliceState,
   type StepperData,
 } from "./types.ts";
+import { useStepperLive } from "./useStepperLive.ts";
 
 type StepStatus = "done" | "current" | "future";
 
@@ -40,10 +41,14 @@ function classes(...names: (string | false | undefined | null)[]): string {
 }
 
 export type StepperProps = {
+  /** When omitted the component subscribes to the live store and falls
+   *  back to the fixture if the store has no current sprint yet. */
   data?: StepperData;
 };
 
-export function Stepper({ data = stepperFixture }: StepperProps) {
+export function Stepper({ data: injected }: StepperProps = {}) {
+  const live = useStepperLive();
+  const data = injected ?? live ?? stepperFixture;
   const currentIdx = SPRINT_STATES.indexOf(data.currentState);
   const allDone = data.currentState === "complete";
 
