@@ -183,10 +183,13 @@ export class SseClient {
       this.store.patch("slices", slices);
     }
     if (payload.aggregates?.per_project) {
-      this.store.patch("project_metrics", {
-        ...this.store.getState().project_metrics,
-        ...payload.aggregates.per_project,
-      });
+      this.store.patch(
+        "project_metrics",
+        translateProjectMetrics(
+          this.store.getState().project_metrics,
+          payload.aggregates.per_project as Record<string, unknown>,
+        ),
+      );
     }
     if (payload.aggregates?.per_slice) {
       this.store.patch("slice_metrics", {
@@ -455,34 +458,125 @@ function mergeSprint(
 }
 
 function mergeSliceMetricsBag(
-  raw: Record<string, Partial<SliceMetrics>>,
+  raw: Record<string, Partial<SliceMetrics> & Record<string, unknown>>,
 ): Record<string, SliceMetrics> {
   const out: Record<string, SliceMetrics> = {};
   for (const [id, m] of Object.entries(raw)) {
-    out[id] = {
-      cost_usd: m.cost_usd ?? 0,
-      tokens_in: m.tokens_in ?? 0,
-      tokens_out: m.tokens_out ?? 0,
-      cache_read: m.cache_read ?? 0,
-      cache_write: m.cache_write ?? 0,
-      ctx_pct: m.ctx_pct ?? 0,
-      last_event_at: m.last_event_at ?? null,
+    // The server keys per_slice by bare `slice_id` and ships
+    // `sprint_id` inside the entry. The cockpit's `store.slices`
+    // is keyed by `<sprint_id>::<slice_id>`, so we mirror that here
+    // (storing under BOTH keys for safety — bare id lookups still
+    // work for tests/dashboards that don't know the sprint).
+    const sprintId = typeof m.sprint_id === "string" ? (m.sprint_id as string) : "";
+    const entry: SliceMetrics = {
+      cost_usd: numField(m, "cost_usd"),
+      tokens_in: numField(m, "tokens_in"),
+      tokens_out: numField(m, "tokens_out"),
+      cache_read: numField(m, "cache_read"),
+      cache_write: numField(m, "cache_write"),
+      ctx_pct: numField(m, "ctx_pct"),
+      last_event_at: typeof m.last_event_at === "string" ? (m.last_event_at as string) : null,
     };
+    out[id] = entry;
+    if (sprintId && !id.includes("::")) {
+      out[`${sprintId}::${id}`] = entry;
+    }
   }
   return out;
 }
 
 function mergeSprintMetricsBag(
-  raw: Record<string, Partial<SprintMetrics>>,
+  raw: Record<string, Partial<SprintMetrics> & Record<string, unknown>>,
 ): Record<string, SprintMetrics> {
   const out: Record<string, SprintMetrics> = {};
   for (const [id, m] of Object.entries(raw)) {
+    // Server emits `tokens_in` + `tokens_out` separately; the cockpit
+    // shape combines them into a single `tokens` total.
+    const tokensIn = numField(m, "tokens_in");
+    const tokensOut = numField(m, "tokens_out");
+    const declaredTokens = numField(m, "tokens");
     out[id] = {
-      cost_usd: m.cost_usd ?? 0,
-      tokens: m.tokens ?? 0,
-      tier1_hit_count: m.tier1_hit_count ?? 0,
-      lgtm_first_pass_count: m.lgtm_first_pass_count ?? 0,
+      cost_usd: numField(m, "cost_usd"),
+      tokens: declaredTokens || tokensIn + tokensOut,
+      tier1_hit_count: numField(m, "tier1_hit_count"),
+      lgtm_first_pass_count: numField(m, "lgtm_first_pass_count"),
     };
   }
   return out;
+}
+
+function numField(obj: Record<string, unknown>, key: string): number {
+  const v = obj[key];
+  return typeof v === "number" ? v : 0;
+}
+
+/**
+ * Translate the server's nested `per_project` aggregate payload into
+ * the flat `ProjectMetrics` shape the cockpit consumes.
+ *
+ * Server (from `/aggregates` and the SSE `snapshot.aggregates.per_project`):
+ *
+ *     { today:    { cost_usd, tokens_in, tokens_out, cache_read, cache_write, turns },
+ *       this_week:{ ... },
+ *       last_30d: { ... },
+ *       lifetime: { ..., started_at } }
+ *
+ * Cockpit:
+ *
+ *     { today_cost, week_cost, last_30d_cost, lifetime_cost,
+ *       tokens_in, tokens_out, cache_read, cache_write }
+ *
+ * Token + cache counters mirror `lifetime` (canonical totals); the four
+ * cost fields are pulled from the four buckets respectively. Missing
+ * fields fall back to the prior value so a partial payload doesn't wipe
+ * a working metric.
+ */
+export function translateProjectMetrics(
+  prev: ProjectMetrics,
+  raw: Record<string, unknown>,
+): ProjectMetrics {
+  // The server emits a nested per-bucket shape; older test payloads
+  // ship the flat field directly. `bucketCost` tries the nested bucket
+  // first, then falls back to the flat field (e.g. raw.today_cost).
+  function bucketCost(bucketKey: string, flatKey: string): number {
+    const bucket = raw[bucketKey];
+    if (bucket && typeof bucket === "object" && bucket !== null) {
+      const c = (bucket as Record<string, unknown>).cost_usd;
+      if (typeof c === "number") return c;
+    }
+    const flat = raw[flatKey];
+    return typeof flat === "number" ? flat : Number.NaN;
+  }
+  function pickOr(value: number, fallback: number): number {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  function tokenField(bucketKey: string, field: string, flatKey: string): number {
+    const bucket = raw[bucketKey];
+    if (bucket && typeof bucket === "object" && bucket !== null) {
+      const v = (bucket as Record<string, unknown>)[field];
+      if (typeof v === "number") return v;
+    }
+    const flat = raw[flatKey];
+    return typeof flat === "number" ? flat : Number.NaN;
+  }
+  return {
+    today_cost: pickOr(bucketCost("today", "today_cost"), prev.today_cost),
+    week_cost: pickOr(
+      Number.isFinite(bucketCost("this_week", "week_cost"))
+        ? bucketCost("this_week", "week_cost")
+        : bucketCost("week", "week_cost"),
+      prev.week_cost,
+    ),
+    last_30d_cost: pickOr(
+      Number.isFinite(bucketCost("last_30d", "last_30d_cost"))
+        ? bucketCost("last_30d", "last_30d_cost")
+        : bucketCost("last30d", "last_30d_cost"),
+      prev.last_30d_cost,
+    ),
+    lifetime_cost: pickOr(bucketCost("lifetime", "lifetime_cost"), prev.lifetime_cost),
+    tokens_in: pickOr(tokenField("lifetime", "tokens_in", "tokens_in"), prev.tokens_in),
+    tokens_out: pickOr(tokenField("lifetime", "tokens_out", "tokens_out"), prev.tokens_out),
+    cache_read: pickOr(tokenField("lifetime", "cache_read", "cache_read"), prev.cache_read),
+    cache_write: pickOr(tokenField("lifetime", "cache_write", "cache_write"), prev.cache_write),
+  };
 }
