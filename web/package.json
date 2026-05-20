@@ -6,13 +6,14 @@
   "description": "naml cockpit — V2 web UI",
   "packageManager": "pnpm@10.19.0",
   "scripts": {
+    "_bootstrap": "pnpm install --frozen-lockfile --prefer-offline --silent",
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "pnpm run _bootstrap && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src",
+    "typecheck": "pnpm run _bootstrap && tsc --noEmit",
+    "lint": "pnpm run _bootstrap && biome check src",
     "format": "biome format --write src",
-    "test": "vitest"
+    "test": "pnpm run _bootstrap && vitest"
   },
   "dependencies": {
     "react": "^18.3.1",

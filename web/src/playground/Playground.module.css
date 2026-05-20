@@ -1,0 +1,74 @@
+.page {
+  min-height: 100vh;
+  background: var(--bg-0);
+  padding: 24px 28px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.title {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  color: var(--c-accent);
+  text-transform: uppercase;
+  margin: 0;
+}
+
+.lede {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  max-width: 640px;
+}
+
+.section {
+  background: var(--bg-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionTag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.14em;
+}
+
+.frame {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-0);
+}
+
+.frameRow {
+  display: flex;
+  min-height: 320px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.actions button {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.actions button:hover {
+  border-color: var(--c-accent);
+  color: var(--text-0);
+}

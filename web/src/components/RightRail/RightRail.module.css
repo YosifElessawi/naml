@@ -1,0 +1,210 @@
+.rail {
+  background: var(--bg-1);
+  border-left: 1px solid var(--border);
+  height: 100%;
+  width: 280px;
+  padding: 12px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-1);
+  overflow-y: auto;
+  transition: width 180ms ease, padding 180ms ease;
+}
+
+.railCollapsed {
+  width: 18px;
+  padding: 12px 0;
+  align-items: center;
+  overflow: hidden;
+}
+
+.seg {
+  padding: 10px 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.seg:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+
+.tag {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--text-3);
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.tagAccent {
+  color: var(--c-accent-2);
+}
+
+.tagAccentCool {
+  color: var(--c-accent);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11px;
+  padding: 1px 0;
+}
+
+.label {
+  color: var(--text-2);
+}
+
+.value {
+  color: var(--text-0);
+  font-weight: 600;
+}
+
+.valueWarn {
+  color: var(--c-warn);
+}
+
+.valueLifetime {
+  color: var(--c-accent);
+  font-size: 13px;
+}
+
+.qbar {
+  height: 5px;
+  background: var(--bg-3);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+  margin: 4px 0 2px;
+}
+
+.qbarFill {
+  position: absolute;
+  inset: 0;
+  border-radius: 3px;
+}
+
+.qbarOk {
+  background: var(--c-accent-2);
+}
+
+.qbarWarn {
+  background: var(--c-warn);
+}
+
+.reset {
+  font-size: 9px;
+  color: var(--text-3);
+}
+
+.activity {
+  display: flex;
+  flex-direction: column;
+}
+
+.activityRow {
+  font-size: 10px;
+  color: var(--text-2);
+  padding: 3px 0;
+  border-top: 1px dashed var(--border-soft);
+}
+
+.activityRow:first-of-type {
+  border-top: none;
+}
+
+.activityTs {
+  color: var(--text-3);
+  margin-right: 5px;
+}
+
+.activityEv {
+  color: var(--text-1);
+}
+
+.sid {
+  color: var(--c-accent);
+}
+
+.costBox {
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.06), transparent);
+  border: 1px solid rgba(56, 189, 248, 0.18);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0 2px;
+}
+
+.costBox .row {
+  padding: 2px 0;
+}
+
+.costBox .value {
+  font-weight: 700;
+}
+
+.lifetimeRow {
+  border-top: 1px solid rgba(56, 189, 248, 0.25);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.spark {
+  height: 28px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.sparkBar {
+  flex: 1;
+  background: rgba(56, 189, 248, 0.25);
+  border-radius: 1px;
+  min-height: 2px;
+}
+
+.sparkBarHi {
+  background: var(--c-accent);
+}
+
+.sparkBarWarn {
+  background: var(--c-warn);
+}
+
+.sparkAxis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8px;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+/* Collapsed strip — only the sync dot remains visible so the user still
+   knows the cockpit is alive even when they've reclaimed width. */
+.collapsedDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--c-accent-2);
+  box-shadow: 0 0 8px var(--c-accent-2);
+}
+
+.collapsedDotSlow {
+  background: var(--c-warn);
+  box-shadow: 0 0 8px var(--c-warn);
+}
+
+.collapsedDotLost {
+  background: var(--c-danger);
+  box-shadow: 0 0 8px var(--c-danger);
+}
+
+.collapsedDotConnecting {
+  background: var(--c-accent);
+  box-shadow: 0 0 8px var(--c-accent);
+}

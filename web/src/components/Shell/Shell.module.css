@@ -1,0 +1,70 @@
+.shell {
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "header header"
+    "main rail";
+  min-height: 100vh;
+  background: var(--bg-0);
+  color: var(--text-0);
+}
+
+.header {
+  grid-area: header;
+}
+
+.main {
+  grid-area: main;
+  overflow: auto;
+  padding: 24px 28px;
+  min-width: 0;
+}
+
+.rail {
+  grid-area: rail;
+  display: flex;
+}
+
+.placeholder {
+  max-width: 920px;
+  margin: 0 auto;
+  background: var(--bg-1);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  padding: 28px 32px;
+  color: var(--text-1);
+}
+
+.placeholder h1 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-0);
+  letter-spacing: -0.01em;
+}
+
+.placeholder p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.placeholder code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--c-accent);
+}
+
+.routeTag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--c-accent);
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  border-radius: 4px;
+  padding: 3px 7px;
+  margin-bottom: 12px;
+}

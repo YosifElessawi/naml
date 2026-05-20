@@ -1,10 +1,11 @@
+import { Shell } from "./components/Shell/Shell.tsx";
+import { Playground } from "./playground/Playground.tsx";
+import { useRoute } from "./router/router.ts";
+
 export function App() {
-  return (
-    <main className="naml-shell">
-      <header className="naml-header">
-        <h1>naml cockpit</h1>
-        <p className="naml-subtle">Scaffold ready — UI lands in subsequent slices.</p>
-      </header>
-    </main>
-  );
+  const [route] = useRoute();
+  if (route.name === "playground") {
+    return <Playground />;
+  }
+  return <Shell />;
 }
