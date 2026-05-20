@@ -1,0 +1,279 @@
+/* Sprint state stepper + aux strip — matches q4-sprint-state.html Option A. */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-family: var(--sans, system-ui, sans-serif);
+}
+
+/* ── horizontal pill stepper ── */
+.stepper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  background: var(--bg-1, #0f131a);
+  border: 1px solid var(--border-soft, #1f2733);
+  border-radius: 12px;
+  padding: 16px 18px;
+  position: relative;
+}
+
+.step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-3, #1c2330);
+  border: 2px solid var(--border, #2a3342);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-3, #4d5666);
+  transition: all 0.4s ease;
+}
+
+.stepDone .dot {
+  background: var(--c-accent-2, #34d399);
+  border-color: var(--c-accent-2, #34d399);
+  color: #04201a;
+}
+
+.stepCurrent .dot {
+  background: var(--c-accent, #38bdf8);
+  border-color: var(--c-accent, #38bdf8);
+  color: #052735;
+  box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15), 0 0 14px rgba(56, 189, 248, 0.5);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.lbl {
+  margin-top: 8px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-2, #7c8696);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.stepCurrent .lbl {
+  color: var(--c-accent, #38bdf8);
+  font-weight: 600;
+}
+
+.stepDone .lbl {
+  color: var(--text-1, #b9c2cf);
+}
+
+.dur {
+  margin-top: 3px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  color: var(--text-3, #4d5666);
+}
+
+.stepCurrent .dur {
+  color: var(--c-accent, #38bdf8);
+}
+
+.stepDone .dur {
+  color: var(--text-2, #7c8696);
+}
+
+/* connectors — 2px line, top:14px centered on the 28px dot */
+.step::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border, #2a3342);
+  z-index: -1;
+}
+
+.stepLast::after {
+  display: none;
+}
+
+.stepDone::after,
+.stepCurrent::after {
+  background: var(--c-accent-2, #34d399);
+}
+
+/* slice sub-rail inside the executing step */
+.subRail {
+  margin-top: 6px;
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+}
+
+.cell {
+  width: 11px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--bg-3, #1c2330);
+}
+
+.cellIdle {
+  background: var(--c-idle, #4d5666);
+}
+.cellSetup {
+  background: var(--c-setup, #6b7280);
+}
+.cellWork {
+  background: var(--c-work, #38bdf8);
+}
+.cellPr {
+  background: var(--c-pr, #a78bfa);
+}
+.cellReview {
+  background: var(--c-review, #fbbf24);
+}
+.cellMerged {
+  background: var(--c-merged, #34d399);
+}
+.cellFailed {
+  background: var(--c-failed, #f87171);
+}
+.cellBlocked {
+  background: var(--c-blocked, #94a3b8);
+}
+.cellHuman {
+  background: var(--c-human, #fb923c);
+}
+
+/* ── aux stat strip ── */
+.aux {
+  display: flex;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--bg-1, #0f131a);
+  border: 1px solid var(--border-soft, #1f2733);
+  border-radius: 10px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--text-2, #7c8696);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.stat {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.stat b {
+  color: var(--text-0, #e7ecf3);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.statEta b {
+  color: var(--c-accent, #38bdf8);
+}
+
+.divider {
+  width: 1px;
+  height: 16px;
+  background: var(--border-soft, #1f2733);
+}
+
+.grow {
+  flex: 1;
+  min-width: 8px;
+}
+
+.lastTick {
+  color: var(--text-3, #4d5666);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* ── alternate exits muted strip ── */
+.fork {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 0;
+  padding: 8px 14px;
+  background: var(--bg-1, #0f131a);
+  border: 1px dashed var(--border-soft, #1f2733);
+  border-radius: 8px;
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--text-3, #4d5666);
+  flex-wrap: wrap;
+}
+
+.forkLabel {
+  color: var(--text-3, #4d5666);
+  letter-spacing: 0.1em;
+}
+
+.exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.exitDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bg-3, #1c2330);
+  border: 1px solid var(--border, #2a3342);
+}
+
+.exitFailed.lit {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.exitHuman.lit {
+  background: rgba(251, 146, 60, 0.2);
+  border-color: rgba(251, 146, 60, 0.4);
+}
+
+.exitPartial.lit {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+.arrow {
+  color: var(--text-3, #4d5666);
+}
+
+/* keyframes — local to module; mockup uses the same name */
+@keyframes pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.15), 0 0 14px rgba(56, 189, 248, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(56, 189, 248, 0.08), 0 0 22px rgba(56, 189, 248, 0.65);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stepCurrent .dot {
+    animation: none;
+  }
+}
