@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { type Route, useRoute } from "../../router/router.ts";
+import { Settings } from "../../views/Settings/index.ts";
+import { Lanes } from "../../views/Sprint/Lanes/index.ts";
+import { Stepper } from "../../views/Sprint/Stepper/index.ts";
+import { Dashboard } from "../Dashboard/Dashboard.tsx";
 import { Header, type HeaderTab } from "../Header/Header.tsx";
 import { RightRail } from "../RightRail/RightRail.tsx";
 import styles from "./Shell.module.css";
@@ -27,34 +31,21 @@ function tabToRoute(tab: HeaderTab): Route {
   }
 }
 
-function MainPane({ route }: { route: Route }) {
+function MainPane({ route, navigate }: { route: Route; navigate: (r: Route) => void }) {
   switch (route.name) {
     case "dashboard":
-      return (
-        <section className={styles.placeholder} aria-label="Dashboard">
-          <span className={styles.routeTag}>DASHBOARD</span>
-          <h1>Dashboard</h1>
-          <p>
-            Project hero + cost cluster + health row land in slice-3. This is the route placeholder.
-          </p>
-        </section>
-      );
+      return <Dashboard />;
     case "sprint":
       return (
-        <section className={styles.placeholder} aria-label="Sprint">
-          <span className={styles.routeTag}>SPRINT</span>
-          <h1>Sprint · {route.sprintId}</h1>
-          <p>
-            Sprint header, lanes, and slice grid land in slices 4–6. This is the route placeholder.
-          </p>
+        <section className={styles.sprintPane} aria-label="Sprint">
+          <Stepper />
+          <Lanes />
         </section>
       );
     case "settings":
       return (
-        <section className={styles.placeholder} aria-label="Settings">
-          <span className={styles.routeTag}>SETTINGS · {route.tab.toUpperCase()}</span>
-          <h1>Settings · {route.tab}</h1>
-          <p>Settings tabs (general, accounts, projects, health) land in slice-8.</p>
+        <section className={styles.settingsPane} aria-label="Settings">
+          <Settings tab={route.tab} onTabChange={(tab) => navigate({ name: "settings", tab })} />
         </section>
       );
     case "playground":
@@ -85,7 +76,7 @@ export function Shell() {
         <Header activeTab={routeToTab(route)} onTabChange={(tab) => navigate(tabToRoute(tab))} />
       </div>
       <main className={styles.main} tabIndex={-1}>
-        <MainPane route={route} />
+        <MainPane route={route} navigate={navigate} />
       </main>
       <div className={styles.rail}>
         <RightRail collapsed={railCollapsed} />

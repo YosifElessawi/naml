@@ -26,6 +26,20 @@
   display: flex;
 }
 
+/* Sprint pane: composes Stepper + Lanes. Transparent wrapper so each child
+   keeps its own visual treatment. */
+.sprintPane {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Settings pane: transparent wrapper just to give the region its accessible
+   name; Settings.tsx ships its own layout. */
+.settingsPane {
+  display: contents;
+}
+
 .placeholder {
   max-width: 920px;
   margin: 0 auto;
