@@ -1,10 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  intervene,
-  isTerminalUnlocked,
-  TERMINAL_UNLOCKED_STATES,
-} from "./intervene.ts";
+import { TERMINAL_UNLOCKED_STATES, intervene, isTerminalUnlocked } from "./intervene.ts";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -13,15 +9,27 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// Tightly-typed fetch mock factory. `vi.fn(async () => …)` infers the
+// implementation as a zero-arg function, which then types `mock.calls` as
+// `[][]` and breaks destructuring under `noUncheckedIndexedAccess`. Casting
+// through `typeof fetch` gives us the right shape both for the call site
+// (the production code passes a real URL + init) and for the assertions.
+function fetchMockReturning(impl: () => Promise<Response> | never) {
+  return vi.fn<typeof fetch>(impl as unknown as typeof fetch);
+}
+
 describe("intervene fetch wiring", () => {
   it("POSTs the right URL with action query param", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, detail: "queued" }));
+    const fetchMock = fetchMockReturning(async () => jsonResponse({ ok: true, detail: "queued" }));
     const result = await intervene("slice-2", "hold", { fetch: fetchMock });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0];
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    if (!call) return;
+    const [url, init] = call;
     expect(url).toBe("/intervene/slice-2?action=hold");
-    expect((init as RequestInit).method).toBe("POST");
+    expect(init?.method).toBe("POST");
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.action).toBe("hold");
@@ -30,12 +38,8 @@ describe("intervene fetch wiring", () => {
   });
 
   it("maps 409 conflicts to InterveneFailure with current_state", async () => {
-    const fetchMock = vi.fn(
-      async () =>
-        jsonResponse(
-          { error: "slice is in 'work'", current_state: "work" },
-          409,
-        ),
+    const fetchMock = fetchMockReturning(async () =>
+      jsonResponse({ error: "slice is in 'work'", current_state: "work" }, 409),
     );
     const result = await intervene("slice-1", "open-terminal", { fetch: fetchMock });
 
@@ -48,7 +52,7 @@ describe("intervene fetch wiring", () => {
   });
 
   it("handles network failures without throwing", async () => {
-    const fetchMock = vi.fn(async () => {
+    const fetchMock = fetchMockReturning(async () => {
       throw new Error("ECONNREFUSED");
     });
     const result = await intervene("slice-1", "hold", { fetch: fetchMock });
@@ -61,9 +65,7 @@ describe("intervene fetch wiring", () => {
   });
 
   it("handles 500s with a sane fallback message when body is not JSON", async () => {
-    const fetchMock = vi.fn(
-      async () => new Response("oops", { status: 500 }),
-    );
+    const fetchMock = fetchMockReturning(async () => new Response("oops", { status: 500 }));
     const result = await intervene("slice-1", "hold", { fetch: fetchMock });
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -73,10 +75,13 @@ describe("intervene fetch wiring", () => {
   });
 
   it("encodes slice ids safely so query injection is impossible", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    const fetchMock = fetchMockReturning(async () => jsonResponse({ ok: true }));
     await intervene("../etc/passwd", "hold", { fetch: fetchMock });
 
-    const [url] = fetchMock.mock.calls[0];
+    const call = fetchMock.mock.calls[0];
+    expect(call).toBeDefined();
+    if (!call) return;
+    const [url] = call;
     expect(url).toContain("..%2Fetc%2Fpasswd");
   });
 });

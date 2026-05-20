@@ -6,12 +6,7 @@
 // fetch wrapper as the real wiring. Mount it on the drawer at the App
 // level (e.g. ``<SliceDrawer onIntervene={intervene} ... />``).
 
-export type InterveneAction =
-  | "hold"
-  | "resume"
-  | "mark-failed"
-  | "skip"
-  | "open-terminal";
+export type InterveneAction = "hold" | "resume" | "mark-failed" | "skip" | "open-terminal";
 
 export interface InterveneSuccess {
   ok: true;
@@ -94,8 +89,7 @@ export async function intervene(
       sliceId,
       action,
       status: response.status,
-      error:
-        body?.error ?? `intervention failed with HTTP ${response.status}`,
+      error: body?.error ?? `intervention failed with HTTP ${response.status}`,
       currentState: body?.current_state,
     };
   }
