@@ -458,6 +458,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_merge.set_defaults(func=_cmd_merge)
 
+    p_recon = sub.add_parser(
+        "reconcile",
+        help=(
+            "detect slices whose PRs were merged externally and promote "
+            "them to `merged` so the sprint rollup matches reality"
+        ),
+    )
+    p_recon.add_argument(
+        "sprint_dir", help="path to a .naml/sprints/<id>/ directory"
+    )
+    p_recon.add_argument(
+        "--root",
+        help="config root (default: cwd or walked up)",
+    )
+    p_recon.add_argument(
+        "--verbose", "-v", action="store_true",
+        help="emit reconcile progress to stderr",
+    )
+    p_recon.set_defaults(func=_cmd_reconcile)
+
     return parser
 
 
@@ -502,6 +522,45 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     print(json.dumps(payload, indent=2))
     # Exit 0 if every attempted slice merged, 1 otherwise.
     return 0 if report.blocked_count() == 0 else 1
+
+
+def _cmd_reconcile(args: argparse.Namespace) -> int:
+    from . import reconciler as reconciler_mod
+
+    if args.verbose:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+    try:
+        cfg = load_config(Path(args.root) if args.root else None)
+    except ConfigError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        sprint = load_sprint(args.sprint_dir)
+    except SprintError as exc:
+        print(f"naml: {exc}", file=sys.stderr)
+        return 1
+
+    sprint_root = Path(args.sprint_dir).expanduser().resolve()
+    report = reconciler_mod.reconcile_sprint(sprint, cfg, sprint_root)
+
+    payload = {
+        "sprint_id": report.sprint_id,
+        "changed_count": report.changed_count,
+        "outcomes": [
+            {
+                "slice_id": o.slice_id,
+                "previous_state": o.previous_state,
+                "new_state": o.new_state,
+                "detail": o.detail,
+            }
+            for o in report.outcomes
+            if o.changed
+        ],
+    }
+    print(json.dumps(payload, indent=2))
+    return 0
 
 
 def _cmd_run(args: argparse.Namespace) -> int:

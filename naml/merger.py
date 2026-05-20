@@ -596,6 +596,13 @@ def merge_sprint(
     be tried so a single conflict doesn't strand the rest of the sprint.
     """
     sprint_root = cfg.sprints_path / sprint.id
+
+    # Reconcile externally-merged PRs before re-entering the pipeline.
+    # If someone clicked "Squash and merge" on GitHub between runs,
+    # the slice should advance to `merged` instead of being re-merged.
+    from . import reconciler as _reconciler  # local: avoid import cycle
+    _reconciler.reconcile_sprint(sprint, cfg, sprint_root)
+
     sprint_state = state_mod.load_sprint_state(sprint_root) or state_mod.SprintState(
         sprint_id=sprint.id
     )
