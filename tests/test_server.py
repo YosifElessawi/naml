@@ -24,6 +24,7 @@ from aiohttp.test_utils import AioHTTPTestCase
 from naml import project_state as ps
 from naml import server as server_mod
 from naml import state as state_mod
+from naml.aggregator import Aggregator
 
 
 class _StubCfg:
@@ -173,6 +174,87 @@ class StaticServingTests(_ServerIntegrationBase):
         body = await resp.text()
         self.assertIn("pnpm", body)
         self.assertIn("web/dist", body)
+
+
+class AggregatesEndpointTests(AioHTTPTestCase):
+    """Cover ``GET /aggregates`` + ``POST /aggregates/reset``.
+
+    We seed the project with one JSONL line so cold-start replay has
+    something to find, then verify both endpoints respond with the
+    expected shape and behaviour.
+    """
+
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self._root = Path(self._td.name).resolve()
+        sprints = self._root / ".naml" / "sprints"
+        sprints.mkdir(parents=True)
+        # One JSONL line so cold-start observes a non-empty replay.
+        state = sprints / "sprint-A" / "state"
+        state.mkdir(parents=True)
+        (state / "slice-1.tokens.jsonl").write_text(
+            json.dumps({
+                "t": "2026-05-19T14:23:14.812+00:00",
+                "slice": "slice-1",
+                "session": "sess",
+                "turn": 1,
+                "tokens_in": 100,
+                "tokens_out": 50,
+                "cache_read": 0,
+                "cache_write": 0,
+                "cost_usd": 0.10,
+                "ctx_pct": 5,
+            }) + "\n",
+            encoding="utf-8",
+        )
+        self._dist = self._root / "web" / "dist"
+        super().setUp()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        self._td.cleanup()
+
+    async def get_application(self):  # type: ignore[override]
+        cfg = _StubCfg(
+            repo_root=self._root,
+            sprints_path=self._root / ".naml" / "sprints",
+        )
+        # build_app does cold-start replay by default.
+        return server_mod.build_app(cfg, web_dist=self._dist)
+
+    async def test_get_aggregates_returns_spec_shape(self) -> None:
+        resp = await self.client.get("/aggregates")
+        self.assertEqual(resp.status, 200)
+        body = await resp.json()
+        self.assertEqual(
+            set(body.keys()), {"per_slice", "per_sprint", "per_project"}
+        )
+        self.assertIn("slice-1", body["per_slice"])
+        self.assertIn("sprint-A", body["per_sprint"])
+        # The headline cost timeline keys must all be present.
+        for win in ("today", "this_week", "last_30d", "lifetime"):
+            self.assertIn(win, body["per_project"])
+
+    async def test_reset_recomputes_correctly(self) -> None:
+        # Mutate the aggregator in place — simulating drift — then reset.
+        agg: Aggregator = self.app[server_mod.APP_KEY_AGGREGATOR]
+        agg.reset()
+        # Reset alone should have zeroed it out.
+        self.assertEqual(agg.per_slice, {})
+
+        resp = await self.client.post("/aggregates/reset")
+        self.assertEqual(resp.status, 200)
+        payload = await resp.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["events_replayed"], 1)
+
+        # Aggregator must once again know about the seeded event.
+        resp2 = await self.client.get("/aggregates")
+        body = await resp2.json()
+        self.assertIn("slice-1", body["per_slice"])
+        self.assertAlmostEqual(
+            body["per_slice"]["slice-1"]["cost_usd"], 0.10, places=6,
+        )
 
 
 class BuiltIndexTests(AioHTTPTestCase):

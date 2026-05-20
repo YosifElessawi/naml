@@ -37,17 +37,22 @@ needs_info = "needs-info"
 name = "test"
 argv = ["python3", "-m", "unittest", "discover", "-s", "tests"]
 
+# Each web gate ensures node_modules is present before running. Worktrees
+# start without a node_modules (it's gitignored and not in the [worktree]
+# symlink list), so the lane's first web-gate invocation in a fresh
+# worktree installs from the committed pnpm-lock.yaml. Subsequent gates
+# in the same worktree skip the install (the test -d short-circuit).
 [[gates]]
 name = "web-lint"
-argv = ["pnpm", "--dir", "web", "lint"]
+argv = ["sh", "-c", "cd web && { [ -d node_modules ] || pnpm install --frozen-lockfile --silent; } && pnpm lint"]
 
 [[gates]]
 name = "web-typecheck"
-argv = ["pnpm", "--dir", "web", "typecheck"]
+argv = ["sh", "-c", "cd web && { [ -d node_modules ] || pnpm install --frozen-lockfile --silent; } && pnpm typecheck"]
 
 [[gates]]
 name = "web-test"
-argv = ["pnpm", "--dir", "web", "test", "--run"]
+argv = ["sh", "-c", "cd web && { [ -d node_modules ] || pnpm install --frozen-lockfile --silent; } && pnpm test --run"]
 
 
 [run]
