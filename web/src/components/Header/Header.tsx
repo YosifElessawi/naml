@@ -1,3 +1,7 @@
+import { useEffect, useState } from "react";
+import { type Store, store as defaultStore } from "../../store/store.ts";
+import type { NamlStore } from "../../store/types.ts";
+import { SyncDot } from "../SyncDot/index.ts";
 import styles from "./Header.module.css";
 
 export type HeaderTab = "dashboard" | "sprint" | "settings";
@@ -5,11 +9,10 @@ export type HeaderTab = "dashboard" | "sprint" | "settings";
 export interface HeaderProps {
   activeTab: HeaderTab;
   onTabChange: (tab: HeaderTab) => void;
-  syncLabel?: string;
+  /** Inject a store for tests. Defaults to the singleton populated by SSE. */
+  store?: Store;
+  /** Override displayed project name. Default = the naml repo slug. */
   projectLabel?: string;
-  sprintName?: string;
-  sprintDone?: number;
-  sprintTotal?: number;
   hasNotifications?: boolean;
   accountInitials?: string;
   accountLabel?: string;
@@ -22,18 +25,42 @@ const TAB_LABEL: Record<HeaderTab, string> = {
   settings: "Settings",
 };
 
+interface SprintPin {
+  name: string;
+  done: number;
+  total: number;
+}
+
+function pickPin(s: NamlStore): SprintPin | null {
+  const sprints = Object.values(s.sprints);
+  if (sprints.length === 0) return null;
+  // Pick the most recently updated sprint as the pin.
+  const sorted = sprints.slice().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  const top = sorted[0];
+  if (!top) return null;
+  return { name: top.id, done: top.slicesDone, total: top.slicesTotal };
+}
+
 export function Header({
   activeTab,
   onTabChange,
-  syncLabel = "Synced 2s",
-  projectLabel = "inpolicy/web",
-  sprintName = "2026-05-19-html-renderer",
-  sprintDone = 5,
-  sprintTotal = 8,
+  store = defaultStore,
+  projectLabel = "YosifElessawi/naml",
   hasNotifications = true,
   accountInitials = "YE",
   accountLabel = "personal",
 }: HeaderProps) {
+  const [pin, setPin] = useState<SprintPin | null>(() => pickPin(store.getState()));
+  useEffect(() => {
+    const pull = () => setPin(pickPin(store.getState()));
+    const off = store.subscribeKey("sprints", pull);
+    pull();
+    return off;
+  }, [store]);
+
+  const sprintName = pin?.name ?? "—";
+  const sprintDone = pin?.done ?? 0;
+  const sprintTotal = pin?.total ?? 0;
   const progress = sprintTotal > 0 ? Math.min(100, (sprintDone / sprintTotal) * 100) : 0;
 
   return (
@@ -42,8 +69,7 @@ export function Header({
         ▟ naml
       </span>
       <span className={styles.sync} aria-live="polite">
-        <span className={`${styles.ddot} naml-pulse`} aria-hidden="true" />
-        {syncLabel}
+        <SyncDot store={store} />
       </span>
       <span className={styles.div} aria-hidden="true" />
       <button type="button" className={styles.switcher} aria-label="Switch project">

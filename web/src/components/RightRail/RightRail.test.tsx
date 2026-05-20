@@ -3,23 +3,22 @@ import { describe, expect, it } from "vitest";
 import { RightRail } from "./RightRail.tsx";
 
 describe("RightRail", () => {
-  it("renders the cost timeline + quota sections when expanded", () => {
+  it("renders the wired sections when expanded", () => {
     render(<RightRail collapsed={false} />);
-    expect(screen.getByText("COST TIMELINE")).toBeInTheDocument();
+    // Cost timeline is now rendered by slice-13's <CostTimeline />, which
+    // emits its own "Cost Timeline" header.
+    expect(screen.getByText(/cost timeline/i)).toBeInTheDocument();
     expect(screen.getByText("SESSION QUOTA")).toBeInTheDocument();
     expect(screen.getByText("WEEKLY QUOTA")).toBeInTheDocument();
-    expect(screen.getByText("THIS PROJECT")).toBeInTheDocument();
-    expect(screen.getAllByTestId("activity-row")).toHaveLength(3);
+    // The activity ticker subscribes to the live store; on a fresh store
+    // there are no entries to render — the section header still exists.
+    expect(screen.getByText("SYNC")).toBeInTheDocument();
   });
 
   it("collapses to an icon strip that still shows a sync dot", () => {
-    render(<RightRail collapsed syncState="live" />);
-    expect(screen.queryByText("COST TIMELINE")).not.toBeInTheDocument();
-    expect(screen.getByRole("status", { name: /sync live/i })).toBeInTheDocument();
-  });
-
-  it("reflects sync state on the collapsed dot", () => {
-    render(<RightRail collapsed syncState="lost" />);
-    expect(screen.getByRole("status", { name: /sync lost/i })).toBeInTheDocument();
+    render(<RightRail collapsed />);
+    expect(screen.queryByText(/cost timeline/i)).not.toBeInTheDocument();
+    // SyncDot exposes a role="status" via its <output> element.
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 });

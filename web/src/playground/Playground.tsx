@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { Header, type HeaderTab } from "../components/Header/Header.tsx";
-import { RightRail, type SyncState } from "../components/RightRail/RightRail.tsx";
+import { RightRail } from "../components/RightRail/RightRail.tsx";
 import styles from "./Playground.module.css";
-
-const SYNC_STATES: SyncState[] = ["live", "slow", "lost", "connecting"];
 
 export function Playground() {
   const [tab, setTab] = useState<HeaderTab>("dashboard");
-  const [sync, setSync] = useState<SyncState>("live");
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -39,15 +36,8 @@ export function Playground() {
         <div className={styles.frame}>
           <div className={styles.frameRow}>
             <div style={{ flex: 1, background: "var(--bg-0)" }} />
-            <RightRail collapsed={false} syncState={sync} />
+            <RightRail collapsed={false} />
           </div>
-        </div>
-        <div className={styles.actions}>
-          {SYNC_STATES.map((s) => (
-            <button key={s} type="button" onClick={() => setSync(s)}>
-              sync={s}
-            </button>
-          ))}
         </div>
       </section>
 
@@ -56,7 +46,7 @@ export function Playground() {
         <div className={styles.frame}>
           <div className={styles.frameRow}>
             <div style={{ flex: 1, background: "var(--bg-0)" }} />
-            <RightRail collapsed={collapsed} syncState={sync} />
+            <RightRail collapsed={collapsed} />
           </div>
         </div>
         <div className={styles.actions}>
