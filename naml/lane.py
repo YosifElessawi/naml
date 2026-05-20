@@ -199,12 +199,16 @@ def _await_hold_clearance(
     """
     if not state_mod.is_hold_requested(sprint_root, status.slice_id):
         return
-    _transition(
-        status,
-        states.HELD,
-        sprint_root=sprint_root,
-        detail="HOLD requested — paused after turn",
-    )
+    # Don't record a second held→held transition on cross-restart resume,
+    # when the slice is already in ``held`` from a previous naml run. Two
+    # adjacent identical transitions would clutter the cockpit timeline.
+    if status.state != states.HELD:
+        _transition(
+            status,
+            states.HELD,
+            sprint_root=sprint_root,
+            detail="HOLD requested — paused after turn",
+        )
     while state_mod.is_hold_requested(sprint_root, status.slice_id):
         time.sleep(poll_interval)
     _transition(

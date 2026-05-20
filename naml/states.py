@@ -57,6 +57,16 @@ TERMINAL_UNLOCKED_STATES: Final[frozenset[str]] = frozenset({
     FAILED, NEEDS_HUMAN_REVIEW, ABANDONED, BLOCKED_UPSTREAM,
 })
 
+
+# States from which a HOLD intervention is meaningful. The lane only
+# checks the sentinel inside the work/gate-fix/review-fix loops; ``pr``
+# and downstream states never enter the spin loop, so writing a
+# sentinel there would orphan the file. Per the slice-14 spec:
+#
+#   > pr state is NOT held-able. Once the PR is open, the implementer
+#   > session is already at rest; user can open terminal directly.
+HOLDABLE_STATES: Final[frozenset[str]] = frozenset({SETUP, WORK})
+
 # States that count as "the lane is done with this slice, scheduler may
 # release dependents". A slice in needs_human_review or failed does NOT
 # qualify — its dependents are blocked.

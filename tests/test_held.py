@@ -68,6 +68,29 @@ class AwaitHoldClearanceTests(unittest.TestCase):
         self.assertEqual(status.state, states.WORK)
         self.assertEqual(status.transitions, [])
 
+    def test_no_duplicate_held_transition_when_already_held(self) -> None:
+        # Simulate cross-restart: the slice was already held on disk from
+        # a previous naml run; the lane reclaims it and enters
+        # ``_await_hold_clearance`` immediately. We should NOT record a
+        # second held→held transition (that would clutter the timeline).
+        status = state_mod.SliceStatus(slice_id="slice-2", state=states.HELD)
+        status.record_transition(state=states.HELD, detail="from prior run")
+        state_mod.write_hold_requested(self._tmp, "slice-2")
+
+        def clear_after_delay() -> None:
+            time.sleep(0.05)
+            state_mod.clear_hold_requested(self._tmp, "slice-2")
+
+        threading.Thread(target=clear_after_delay, daemon=True).start()
+        lane_mod._await_hold_clearance(status, self._tmp, poll_interval=0.01)
+
+        # Only one held entry + one work entry — no duplicate held.
+        held_count = sum(1 for t in status.transitions if t.state == states.HELD)
+        work_count = sum(1 for t in status.transitions if t.state == states.WORK)
+        self.assertEqual(held_count, 1, "should not record a second held transition")
+        self.assertEqual(work_count, 1)
+        self.assertEqual(status.state, states.WORK)
+
     def test_held_transitions_recorded_and_loop_exits_on_clear(self) -> None:
         status = state_mod.SliceStatus(slice_id="slice-2", state=states.WORK)
         state_mod.write_hold_requested(self._tmp, "slice-2")
@@ -287,6 +310,40 @@ class ProcessSliceHeldResumeTests(unittest.TestCase):
         self.assertEqual(reloaded.session_id, "prev-session-uuid")
 
 
+class AppleScriptEscapeTests(unittest.TestCase):
+    """``_applescript_double_quote_escape`` defends against worktree paths
+    that contain literal ``"`` or ``\\`` from breaking the AppleScript
+    used to launch Terminal.app. Today naml controls the path so this
+    is purely defensive."""
+
+    def test_no_special_chars_is_a_passthrough(self) -> None:
+        self.assertEqual(
+            server_mod._applescript_double_quote_escape("/Users/me/worktrees/slice-1"),
+            "/Users/me/worktrees/slice-1",
+        )
+
+    def test_double_quotes_are_backslash_escaped(self) -> None:
+        self.assertEqual(
+            server_mod._applescript_double_quote_escape('a"b'),
+            'a\\"b',
+        )
+
+    def test_backslashes_are_escaped_first(self) -> None:
+        # If we escaped `"` first the backslash pass would then double up
+        # the backslash we just added. Order matters.
+        self.assertEqual(
+            server_mod._applescript_double_quote_escape('a\\"b'),
+            'a\\\\\\"b',
+        )
+
+    def test_combined(self) -> None:
+        # A path Apple's docs themselves use as a torture test.
+        self.assertEqual(
+            server_mod._applescript_double_quote_escape('he said "hi\\there"'),
+            'he said \\"hi\\\\there\\"',
+        )
+
+
 class InterveneEndpointUnitTests(unittest.TestCase):
     """Drive ``server._intervene_response`` directly — no event loop."""
 
@@ -351,6 +408,39 @@ class InterveneEndpointUnitTests(unittest.TestCase):
         on_disk = state_mod.load_slice_status(self._sprint_root, "slice-1")
         assert on_disk is not None
         self.assertEqual(on_disk.state, states.WORK)
+
+    def test_hold_in_setup_is_accepted(self) -> None:
+        # ``setup`` is in HOLDABLE_STATES so the lane will catch the
+        # sentinel as soon as it enters work.
+        self._write_status(states.SETUP)
+        resp = server_mod._intervene_response(self._cfg, "slice-1", "hold")
+        self.assertEqual(resp.status, 200)
+        self.assertTrue(state_mod.is_hold_requested(self._sprint_root, "slice-1"))
+
+    def test_hold_refused_in_pr_state(self) -> None:
+        # PR is not held-able per the slice-14 spec — the lane is already
+        # at rest there. Writing the sentinel would orphan it forever.
+        self._write_status(states.PR)
+        self.assertFalse(state_mod.is_hold_requested(self._sprint_root, "slice-1"))
+        resp = server_mod._intervene_response(self._cfg, "slice-1", "hold")
+        self.assertEqual(resp.status, 409)
+        body = self._body(resp)
+        self.assertEqual(body["current_state"], states.PR)
+        self.assertIn("HOLD only applies", body["error"])
+        # Crucially: no sentinel was written.
+        self.assertFalse(state_mod.is_hold_requested(self._sprint_root, "slice-1"))
+
+    def test_hold_refused_in_terminal_state(self) -> None:
+        for state in (states.MERGED, states.FAILED, states.REVIEW, states.HELD):
+            with self.subTest(state=state):
+                self._write_status(state)
+                resp = server_mod._intervene_response(
+                    self._cfg, "slice-1", "hold"
+                )
+                self.assertEqual(resp.status, 409)
+                self.assertFalse(
+                    state_mod.is_hold_requested(self._sprint_root, "slice-1")
+                )
 
     def test_resume_clears_sentinel(self) -> None:
         self._write_status(states.HELD)

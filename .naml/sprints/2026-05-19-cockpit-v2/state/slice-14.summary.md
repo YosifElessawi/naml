@@ -1,10 +1,10 @@
 # slice-14 — held slice state + HOLD/RESUME + drawer wiring
 
 ## What changed
-- **State machine.** `naml/states.py` gains `HELD = "held"` plus a new
-  `TERMINAL_UNLOCKED_STATES` frozenset (the Python source of truth for
-  the open-in-terminal gate). `held` is intentionally NOT in
-  `LANE_DONE_STATES` or `LANE_FAILED_STATES`.
+- **State machine.** `naml/states.py` gains `HELD = "held"` plus
+  `TERMINAL_UNLOCKED_STATES` (open-in-terminal gate) and `HOLDABLE_STATES`
+  (which states a HOLD request is meaningful from). `held` is
+  intentionally NOT in `LANE_DONE_STATES` or `LANE_FAILED_STATES`.
 - **Sentinel.** `naml/state.py` adds `hold_requested_path` /
   `is_hold_requested` / `write_hold_requested` / `clear_hold_requested`.
   The sentinel file is `state/<slice>.hold_requested` (zero-byte), durable
@@ -32,12 +32,17 @@
   it got removed externally.
 - **Server.** `naml/server.py` adds `POST /intervene/{slice_id}?action=…`
   supporting `hold | resume | mark-failed | skip | open-terminal`.
-  open-terminal is gated by `TERMINAL_UNLOCKED_STATES` (409 if locked),
-  is macOS-only for now (501 elsewhere), shells out to Terminal.app via
-  AppleScript with `claude --resume <session-id>` in the worktree.
-  Helpers `_intervene_response` and `_resolve_sprint_root_for_slice` are
-  exposed at module level so the tests can drive them without an event
-  loop.
+  - HOLD is 409'd when state is outside `HOLDABLE_STATES = {setup, work}`
+    (per spec: pr / review / merged / terminals are never held-able).
+  - open-terminal is gated by `TERMINAL_UNLOCKED_STATES` (409 if locked),
+    is macOS-only for now (501 elsewhere), and shells out to Terminal.app
+    via AppleScript. Worktree path + session UUID are
+    backslash-escaped (`_applescript_double_quote_escape`) before
+    embedding in the AppleScript double-quoted literal — defensive,
+    naml controls both inputs today.
+  - Helpers `_intervene_response` and `_resolve_sprint_root_for_slice`
+    are exposed at module level so the tests can drive them without
+    an event loop.
 - **Browser wiring.** `web/src/components/SliceDrawer/intervene.ts` is a
   new fetch wrapper exporting `intervene(sliceId, action)` plus a TS
   mirror of `TERMINAL_UNLOCKED_STATES` / `isTerminalUnlocked`. Pairs with
@@ -50,6 +55,16 @@
   Lifts the React-aware piece out of `intervene.ts` so the fetch
   wrapper stays usable from non-React contexts (store subscribers,
   tests, the eventual menu-bar surface).
+- **HoldResumeControls component.**
+  `web/src/components/SliceDrawer/HoldResumeControls.tsx` is the
+  state-aware HOLD / RESUME / MARK FAILED / SKIP / OPEN-IN-TERMINAL
+  button cluster the slice-14 spec calls for under AC#4. RESUME only
+  renders when `state === "held"`; HOLD only renders when state is
+  in `HOLDABLE_STATES`; the locked open-terminal button shows a
+  padlock + tooltip when in setup/work, and the unlocked one in all
+  other states. Authored as a standalone component so the merge
+  composition between slice-7 and slice-14 is purely additive:
+  slice-7's `SliceDrawer.tsx` just imports + mounts it.
 - **Tests.** New `tests/test_held.py` (sentinel round-trip, await-hold
   transitions, state-machine membership, absorb-existing-statuses
   preservation, every intervene action including 409 for locked
@@ -87,19 +102,17 @@
 - **App.tsx wiring is deliberately left to the merge composition step.**
   slice-7's `SliceDrawer.tsx` lives in a sibling worktree at slice-14
   implementation time, so importing it here would fail tsc. After
-  slice-7 + slice-14 are composed, App.tsx (or the future sprint
-  route) just needs `<SliceDrawer onIntervene={(sliceId, action) =>
-  intervene(sliceId, action)} ... />` or the more ergonomic
-  `useIntervene(sliceId)` hook. The drawer's own RESUME button (only
-  rendered when `data.state === "held"`) is a slice-7 file edit that
-  can't be cleanly authored from this worktree without a 3-way merge
-  conflict — flagged for either slice-7's next iteration or a
-  follow-up composition slice.
-- Drawer integration: import `intervene` (or `useIntervene`) from
-  `web/src/components/SliceDrawer/` and pass as the `onIntervene` prop.
-  Drawer uses the returned `InterveneResult` for the flash bar
-  (success → "Hold requested · waiting for current turn", failure →
-  render `result.error` inline).
+  slice-7 + slice-14 are composed, slice-7's drawer just needs to
+  drop a `<HoldResumeControls sliceId={data.id} state={data.state}
+  prUrl={data.prUrl} />` into its action bar (or mount
+  `useIntervene(sliceId)` directly if more layout customisation is
+  needed). App.tsx then mounts the drawer normally.
+- **Cross-restart-with-cockpit-offline gotcha.** If the user clears the
+  sentinel via the cockpit while naml itself is dead, the next
+  `naml run` re-writes the sentinel as a defensive measure (the
+  scheduler can't trust an instruction it didn't see). The user has
+  to press RESUME again. Documented in `docs/DESIGN-V2.md`; the
+  cockpit should surface "naml is offline" to set expectations.
 - `INTERVENE_ACTIONS` on the Python side and the `InterveneAction` TS
   union are the cross-language contract — extend both in lockstep if
   new actions are added.

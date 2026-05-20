@@ -300,6 +300,23 @@ def _resolve_sprint_root_for_slice(
     return None
 
 
+def _applescript_double_quote_escape(value: str) -> str:
+    """Escape ``value`` for embedding inside an AppleScript double-quoted
+    string literal.
+
+    AppleScript string literals only recognise two escape sequences inside
+    double quotes: ``\\\\`` for a literal backslash and ``\\"`` for a
+    literal double quote. Order matters — escape backslashes first so
+    we don't double-escape the ones we add for double-quotes.
+
+    naml controls the worktree path and session UUID, so a `"` here is
+    not exploitable today. The escape is defensive: a future feature
+    that lets users pass arbitrary paths into the open-terminal flow
+    won't accidentally inject AppleScript.
+    """
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _open_terminal_macos(worktree: Path, session_id: str) -> bool:
     """Spawn Terminal.app at ``worktree`` running ``claude --resume``.
 
@@ -312,9 +329,10 @@ def _open_terminal_macos(worktree: Path, session_id: str) -> bool:
     cwd = shlex.quote(str(worktree))
     resume_arg = shlex.quote(session_id) if session_id else ""
     inner = f"cd {cwd} && claude --resume {resume_arg}".rstrip()
+    inner_for_applescript = _applescript_double_quote_escape(inner)
     script = (
         'tell application "Terminal" to do script '
-        f'"{inner}"'
+        f'"{inner_for_applescript}"'
     )
     try:
         subprocess.run(  # noqa: S603 — argv constructed, not a shell string
@@ -361,6 +379,25 @@ def _intervene_response(
     sprint_root, status = located
 
     if action == "hold":
+        # Refuse HOLD outside the held-able states. The lane only checks
+        # the sentinel inside the work / gate-fix / review-fix loops; if
+        # we wrote the sentinel while the slice is already in ``pr`` or
+        # a terminal state, it would sit on disk forever and confuse the
+        # next naml run. The drawer also gates client-side, but the
+        # server is the source of truth.
+        if status.state not in states.HOLDABLE_STATES:
+            return web.json_response(
+                {
+                    "error": (
+                        f"slice is in {status.state!r}; HOLD only applies "
+                        "while the implementer is active (setup or work). "
+                        "If the PR is open or the slice has finished, you "
+                        "can open a terminal directly without HOLDing."
+                    ),
+                    "current_state": status.state,
+                },
+                status=409,
+            )
         # Idempotent: writing the sentinel signals the lane; the lane
         # itself flips the slice state to ``held`` once the in-flight
         # turn settles. We don't transition here — that would race with
