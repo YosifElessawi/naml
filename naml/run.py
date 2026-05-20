@@ -318,6 +318,12 @@ def run_sprint(
     scheduler.preflight()  # may raise ScheduleError under "abort"
 
     sprint_root = _resolve_sprint_root(cfg, sprint)
+    # Reconcile externally-merged PRs first. After a rescue, a slice may
+    # be on disk as review_passed (or failed) while its PR is already
+    # merged on GitHub — promote those to merged before the scheduler
+    # absorbs statuses, so dependents see the right upstream state.
+    from . import reconciler as _reconciler  # local: avoid import cycle
+    _reconciler.reconcile_sprint(sprint, cfg, sprint_root)
     # Reconcile with any existing per-slice status files so a re-run does
     # not pop slices that already succeeded (or are mid-attempt). Must run
     # after preflight (forced edges already applied) and before lanes spawn.
