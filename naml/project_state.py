@@ -206,21 +206,27 @@ def on_sprint_start(naml_dir: Path, sprint_id: str) -> ProjectState:
 
     Bumps the ``sprints_started`` counter only when this is a fresh sprint
     (not a resumed one). Transitions to ``active`` unless already active
-    for the same sprint, in which case nothing is appended.
+    for the same sprint, in which case nothing is appended. When the
+    previous state was ``paused`` for this same sprint, records the
+    transition as a resume instead of a fresh start so the timeline reads
+    correctly.
     """
     state = load_project_state(naml_dir)
 
     is_new_sprint = state.current_sprint != sprint_id
+    is_resuming = state.state == PAUSED and not is_new_sprint
     if is_new_sprint:
         state.metrics.sprints_started += 1
         state.current_sprint = sprint_id
 
     if state.state != ACTIVE:
         state.state = ACTIVE
-        state.record_transition(
-            state=ACTIVE,
-            detail=f"sprint {sprint_id} started",
+        detail = (
+            f"sprint {sprint_id} resumed from pause"
+            if is_resuming
+            else f"sprint {sprint_id} started"
         )
+        state.record_transition(state=ACTIVE, detail=detail)
 
     save_project_state(naml_dir, state)
     return state
@@ -245,6 +251,31 @@ def on_sprint_run_finished(
                 detail=f"sprint {sprint_id} finished run with {aggregate_state}",
             )
 
+    save_project_state(naml_dir, state)
+    return state
+
+
+def on_sprint_paused(
+    naml_dir: Path,
+    sprint_id: str,
+    *,
+    mode: str = "drain",
+    detail: str = "",
+) -> ProjectState:
+    """``naml run`` was interrupted by SIGINT/SIGTERM. Flip to ``paused`` so
+    the next ``naml run`` knows it's a resume.
+
+    ``mode`` is ``"drain"`` when in-flight slices finished naturally,
+    ``"forced"`` when SIGINT was hit twice and Claude subprocesses were
+    SIGTERM'd mid-work.
+    """
+    state = load_project_state(naml_dir)
+    if state.state != PAUSED:
+        state.state = PAUSED
+        state.record_transition(
+            state=PAUSED,
+            detail=detail or f"sprint {sprint_id} paused ({mode})",
+        )
     save_project_state(naml_dir, state)
     return state
 
