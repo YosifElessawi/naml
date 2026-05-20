@@ -257,6 +257,134 @@ class AggregatesEndpointTests(AioHTTPTestCase):
         )
 
 
+class IntervenePostTests(_ServerIntegrationBase):
+    """POST ``/intervene/{slice_id}`` is the drawer's intervention surface."""
+
+    async def test_hold_returns_200_accepted_stub(self) -> None:
+        resp = await self.client.post("/intervene/slice-4?action=hold")
+        self.assertEqual(resp.status, 200)
+        body = await resp.json()
+        self.assertEqual(body["status"], "accepted")
+        self.assertEqual(body["action"], "hold")
+        self.assertEqual(body["slice_id"], "slice-4")
+
+    async def test_fail_and_skip_return_200(self) -> None:
+        for action in ("fail", "skip"):
+            resp = await self.client.post(f"/intervene/slice-4?action={action}")
+            self.assertEqual(resp.status, 200, action)
+            body = await resp.json()
+            self.assertEqual(body["action"], action)
+
+    async def test_unknown_action_returns_400(self) -> None:
+        resp = await self.client.post("/intervene/slice-4?action=detonate")
+        self.assertEqual(resp.status, 400)
+        body = await resp.json()
+        self.assertIn("error", body)
+        self.assertIn("hold", body["valid"])
+
+    async def test_missing_action_returns_400(self) -> None:
+        resp = await self.client.post("/intervene/slice-4")
+        self.assertEqual(resp.status, 400)
+
+    async def test_open_terminal_is_handled(self) -> None:
+        """Verifies the route exists and answers without actually spawning
+        Terminal in CI. We monkey-patch ``_spawn_terminal`` so the test is
+        deterministic on macOS too."""
+        original = server_mod._spawn_terminal
+        server_mod._spawn_terminal = lambda *_args, **_kw: False  # type: ignore[assignment]
+        try:
+            resp = await self.client.post("/intervene/slice-4?action=open-terminal")
+            self.assertIn(resp.status, (200, 202))
+            body = await resp.json()
+            self.assertEqual(body["action"], "open-terminal")
+            self.assertIn("launched", body)
+            self.assertFalse(body["launched"])
+        finally:
+            server_mod._spawn_terminal = original  # type: ignore[assignment]
+
+    async def test_open_terminal_rejects_injection_session_id(self) -> None:
+        """Crafted session_ids must be rejected at the boundary — they
+        cannot reach ``_spawn_terminal``. If they ever did, AppleScript's
+        ``do script`` would happily execute shell metacharacters."""
+        bad_ids = (
+            'abc"; do shell script "rm -rf ~"; #',  # AppleScript breakout
+            "abc; rm -rf ~",                         # shell metacharacters
+            "abc def",                               # whitespace
+            "abc$(date)",                            # command substitution
+            "abc`whoami`",                           # backtick subst
+            "../../etc/passwd",                     # path traversal
+            "abc\nrm",                               # newline injection
+            "g" * 64,                                # non-hex chars
+            "",                                      # empty (after %-decode)
+        )
+        spawn_called = {"count": 0}
+
+        def _trap(*_args: object, **_kw: object) -> bool:
+            spawn_called["count"] += 1
+            return False
+
+        original = server_mod._spawn_terminal
+        server_mod._spawn_terminal = _trap  # type: ignore[assignment]
+        try:
+            for bad in bad_ids:
+                from urllib.parse import quote
+
+                resp = await self.client.post(
+                    f"/intervene/slice-4?action=open-terminal"
+                    f"&session_id={quote(bad)}"
+                )
+                self.assertEqual(
+                    resp.status,
+                    400,
+                    f"expected 400 for session_id={bad!r}, got {resp.status}",
+                )
+                body = await resp.json()
+                self.assertEqual(body["error"], "invalid session_id", body)
+            # Crucially: not one of those bad inputs was allowed to reach
+            # the spawner.
+            self.assertEqual(spawn_called["count"], 0)
+        finally:
+            server_mod._spawn_terminal = original  # type: ignore[assignment]
+
+    async def test_open_terminal_accepts_uuid_session_id(self) -> None:
+        """A well-formed (UUID-ish) session_id passes the boundary check."""
+        original = server_mod._spawn_terminal
+        server_mod._spawn_terminal = lambda *_args, **_kw: False  # type: ignore[assignment]
+        try:
+            resp = await self.client.post(
+                "/intervene/slice-4?action=open-terminal"
+                "&session_id=9b0c4a82-f3d8-4ef1-90ab-1234567890ab"
+            )
+            self.assertIn(resp.status, (200, 202))
+            body = await resp.json()
+            self.assertEqual(body["action"], "open-terminal")
+        finally:
+            server_mod._spawn_terminal = original  # type: ignore[assignment]
+
+
+class SpawnTerminalDefenceTests(unittest.TestCase):
+    """Direct unit tests of ``_spawn_terminal`` — the second line of
+    defence against session-id injection (the handler is the first)."""
+
+    def test_rejects_injection_session_id_even_if_reached(self) -> None:
+        """If the handler validator is bypassed in some future refactor,
+        ``_spawn_terminal`` itself still won't run a hostile id."""
+        # We don't need to monkey-patch subprocess here — the function
+        # short-circuits to False before reaching Popen for any non-UUID
+        # input.
+        with tempfile.TemporaryDirectory() as td:
+            worktree = Path(td)
+            self.assertFalse(
+                server_mod._spawn_terminal(
+                    worktree, 'abc"; do shell script "rm -rf ~"; #'
+                )
+            )
+            self.assertFalse(
+                server_mod._spawn_terminal(worktree, "abc; rm -rf ~")
+            )
+            self.assertFalse(server_mod._spawn_terminal(worktree, "abc`id`"))
+
+
 class BuiltIndexTests(AioHTTPTestCase):
     """Same as above but writes a fake bundle first to prove `/` serves it."""
 

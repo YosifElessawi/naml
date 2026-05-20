@@ -19,6 +19,14 @@ Routes:
 - ``GET /aggregates``      → ``Aggregator.snapshot()`` — token/cost rollups.
 - ``POST /aggregates/reset`` → recompute aggregates from disk (Settings →
                              Advanced → Reset Aggregates).
+- ``POST /intervene/{id}`` → drawer intervention endpoint (slice-7).
+                             ``?action=`` is one of ``hold``, ``fail``,
+                             ``skip``, ``open-terminal``. The first three
+                             are recorded as intent and answered 200; the
+                             real state transitions land in slice-14.
+                             ``open-terminal`` shells out to
+                             ``open -a Terminal`` (macOS) so the user can
+                             ``claude --resume`` a paused slice.
 - ``GET /``                → served from ``web/dist/`` when the bundle exists;
                              404 otherwise (Vite owns development).
 
@@ -33,6 +41,10 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
+import shutil
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -74,7 +86,20 @@ HEARTBEAT_TASK_KEY: web.AppKey[Any] = web.AppKey("heartbeat_task", object)
 WATCHER_TASK_KEY: web.AppKey[Any] = web.AppKey("watcher_task", object)
 
 
+# Claude session-ids are UUID-shaped (32 hex chars + 4 dashes). We accept
+# anything that fits the [hex|dash] alphabet up to a sensible cap so future
+# session-id formats don't need a re-deploy, while still rejecting payloads
+# that could contain shell or AppleScript metacharacters — the spawn path
+# interpolates this value into a `claude --resume <id>` shell command run
+# inside an AppleScript ``do script`` literal, where any quote or semicolon
+# would let an attacker who can reach the local ``/intervene`` endpoint
+# (e.g. a malicious page visited in the user's browser, since the server
+# binds to 127.0.0.1 with no CSRF token) execute arbitrary commands.
+_SESSION_ID_RE = re.compile(r"^[0-9a-fA-F-]{1,128}$")
+
+
 # --- /api/state (kept for backwards-compat with naml status) --------------
+
 
 
 
@@ -315,6 +340,155 @@ def _make_events_handler(cfg: Any):
     return _handler
 
 
+# --- /intervene: drawer intervention endpoint (slice-7) ------------------
+
+_VALID_ACTIONS = ("hold", "fail", "skip", "open-terminal")
+
+
+def _slice_worktree(cfg: Any, slice_id: str) -> Path | None:
+    """Best-effort lookup of the worktree path for a slice. Returns ``None``
+    if the project state hierarchy doesn't know about the slice yet — the
+    ``open-terminal`` handler then falls back to the repo root."""
+    try:
+        payload = project_state_mod.build_hierarchy(cfg)
+    except Exception:  # noqa: BLE001 — telemetry-only path
+        return None
+    sprints = payload.get("sprints") if isinstance(payload, dict) else None
+    if not isinstance(sprints, list):
+        return None
+    for sprint in sprints:
+        for sl in sprint.get("slices", []) if isinstance(sprint, dict) else []:
+            if not isinstance(sl, dict):
+                continue
+            if sl.get("id") == slice_id or sl.get("slice_id") == slice_id:
+                wt = sl.get("worktree") or sl.get("worktree_path")
+                if wt:
+                    return Path(str(wt))
+    return None
+
+
+_OSASCRIPT_RUNNER = (
+    'on run argv\n'
+    '    set wt to item 1 of argv\n'
+    '    set sid to item 2 of argv\n'
+    '    set cmd to "cd " & quoted form of wt & " && claude --resume " & sid\n'
+    '    tell application "Terminal" to do script cmd\n'
+    'end run'
+)
+
+
+def _spawn_terminal(worktree: Path, session_id: str | None) -> bool:
+    """Open a new Terminal window at ``worktree`` running ``claude --resume``.
+    Returns ``True`` if the shell-out launched, ``False`` otherwise. macOS
+    only — on Linux/Windows the cockpit currently can't honour the action.
+
+    ``session_id`` must already be validated against ``_SESSION_ID_RE`` by
+    the caller; we re-validate as defence-in-depth so this function is safe
+    to call from any future code path. The worktree path is passed through
+    AppleScript's ``quoted form of`` rather than f-stringed into the shell
+    literal, so it can't break out of the inner string either.
+    """
+    if sys.platform != "darwin":
+        return False
+    if not shutil.which("open"):
+        return False
+    if session_id:
+        if not _SESSION_ID_RE.fullmatch(session_id):
+            log.warning(
+                "rejecting open-terminal: session_id failed validation",
+            )
+            return False
+        try:
+            subprocess.Popen(  # noqa: S603 — argv list, no shell=True
+                [
+                    "osascript",
+                    "-e",
+                    _OSASCRIPT_RUNNER,
+                    str(worktree),
+                    session_id,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except OSError:
+            return False
+    # No session yet — just open a Terminal at the worktree.
+    try:
+        subprocess.Popen(  # noqa: S603 — argv list, no shell=True
+            ["open", "-a", "Terminal", "-n", str(worktree)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except OSError:
+        return False
+
+
+def _make_intervene_handler(cfg: Any):
+    """Drawer intervention endpoint. The real state-machine wiring for
+    ``hold`` lands in slice-14; until then we 200 so the UI can show its
+    flash. ``open-terminal`` does shell out today."""
+
+    async def _handler(request: web.Request) -> web.Response:
+        slice_id = request.match_info.get("slice_id", "").strip()
+        action = (request.rel_url.query.get("action") or "").strip()
+
+        if not slice_id:
+            return web.json_response({"error": "missing slice_id"}, status=400)
+        if action not in _VALID_ACTIONS:
+            return web.json_response(
+                {
+                    "error": f"unknown action {action!r}",
+                    "valid": list(_VALID_ACTIONS),
+                },
+                status=400,
+            )
+
+        log.info("intervene: slice=%s action=%s", slice_id, action)
+
+        if action == "open-terminal":
+            session_id = request.rel_url.query.get("session_id")
+            # Reject malformed session-ids at the boundary so the spawn
+            # path can never see anything that would let an attacker
+            # break out of the AppleScript / shell quoting layers.
+            if session_id is not None and not _SESSION_ID_RE.fullmatch(session_id):
+                return web.json_response(
+                    {
+                        "error": "invalid session_id",
+                        "expected": "^[0-9a-fA-F-]{1,128}$",
+                    },
+                    status=400,
+                )
+            worktree = _slice_worktree(cfg, slice_id) or Path(
+                getattr(cfg, "repo_root", ".")
+            )
+            launched = _spawn_terminal(worktree, session_id)
+            return web.json_response(
+                {
+                    "status": "ok" if launched else "noop",
+                    "action": action,
+                    "slice_id": slice_id,
+                    "launched": launched,
+                    "worktree": str(worktree),
+                },
+                status=200 if launched else 202,
+            )
+
+        # hold / fail / skip — stubbed until slice-14 wires real semantics.
+        return web.json_response(
+            {
+                "status": "accepted",
+                "action": action,
+                "slice_id": slice_id,
+                "note": "stub handler — real state transition lands in slice-14",
+            },
+            status=200,
+        )
+
+    return _handler
+
+
 # --- background tasks: heartbeat + state-file watcher ---------------------
 
 async def _heartbeat_loop(app: web.Application) -> None:
@@ -486,6 +660,7 @@ def build_app(
     app.router.add_get("/events", _make_events_handler(cfg))
     app.router.add_get("/aggregates", _handle_aggregates_get)
     app.router.add_post("/aggregates/reset", _handle_aggregates_reset)
+    app.router.add_post("/intervene/{slice_id}", _make_intervene_handler(cfg))
 
     if web_dist is None:
         repo_root = Path(getattr(cfg, "repo_root", ".")).resolve()
