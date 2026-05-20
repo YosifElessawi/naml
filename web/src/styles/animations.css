@@ -1,0 +1,156 @@
+/* Global animation rules — the Q8 smoothness table.
+ *
+ * Components opt in by adding the `naml-anim-*` classnames or by setting
+ * `data-state` / `data-sync` attributes. JS-driven animations (FLIP and
+ * counter tween) live in `lib/flip.ts` and `lib/tween.ts`; everything
+ * here is CSS-driven so it composes cleanly with React re-renders.
+ */
+
+/* State pill — color tweens (400ms) + text cross-fade (200ms) ---------- */
+.naml-anim-state-pill {
+  transition: background-color 400ms ease, border-color 400ms ease, color 400ms ease;
+}
+
+.naml-anim-state-pill__label {
+  transition: opacity 200ms ease;
+}
+
+/* Card border stripe — 400ms tween on the 3px state stripe ------------- */
+.naml-anim-card-stripe {
+  transition: background-color 400ms ease;
+}
+
+/* Pulse dot — restarts when `data-state` changes. The animation-name
+   carries the state so the keyframes track changes. Slice-2 ships the
+   tokens; we ship a generic 2s pulse here for any element that opts in. */
+@keyframes naml-pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.18);
+  }
+}
+
+.naml-anim-pulse {
+  animation: naml-pulse-soft 2000ms ease-in-out infinite;
+}
+
+/* Activity ticker entries — slide-in 250ms from top -------------------- */
+@keyframes naml-anim-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.naml-anim-ticker-entry {
+  animation: naml-anim-slide-in 250ms ease-out both;
+}
+
+/* Progress bar — width tween 400ms ------------------------------------- */
+.naml-anim-progress > .naml-anim-progress__bar {
+  transition: width 400ms ease;
+}
+
+/* Sync dot — 4 states + cadence variation, 200ms color tween ----------- */
+@keyframes naml-sync-pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+@keyframes naml-sync-pulse-fast {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.35);
+  }
+}
+@keyframes naml-sync-pulse-slow {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(1.08);
+  }
+}
+
+.naml-sync-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #4ea1ff;
+  transition: background-color 200ms ease, box-shadow 200ms ease;
+  vertical-align: middle;
+}
+
+.naml-sync-dot[data-sync="live"] {
+  background: var(--c-live, #4ade80);
+  box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.18);
+  animation: naml-sync-pulse-live 2000ms ease-in-out infinite;
+}
+
+.naml-sync-dot[data-sync="slow"] {
+  background: var(--c-warn, #f59e0b);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.18);
+  animation: none;
+}
+
+.naml-sync-dot[data-sync="lost"] {
+  background: var(--c-failed, #ef4444);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.22);
+  animation: naml-sync-pulse-fast 700ms ease-in-out infinite;
+}
+
+.naml-sync-dot[data-sync="connecting"] {
+  background: var(--c-muted, #8a93a6);
+  box-shadow: 0 0 0 3px rgba(138, 147, 166, 0.18);
+  animation: naml-sync-pulse-slow 1200ms ease-in-out infinite;
+}
+
+/* "Synced Ns ago" labels — desaturate when sync is not live ------------ */
+.naml-anim-timestamp {
+  transition: filter 600ms ease, color 600ms ease, opacity 600ms ease;
+}
+
+[data-sync-scope="slow"] .naml-anim-timestamp,
+[data-sync-scope="lost"] .naml-anim-timestamp {
+  filter: saturate(0.2);
+  opacity: 0.7;
+}
+
+/* Reduced motion — neutralize every animation/transition we ship -------- */
+@media (prefers-reduced-motion: reduce) {
+  .naml-anim-state-pill,
+  .naml-anim-state-pill__label,
+  .naml-anim-card-stripe,
+  .naml-anim-pulse,
+  .naml-anim-ticker-entry,
+  .naml-anim-progress > .naml-anim-progress__bar,
+  .naml-sync-dot,
+  .naml-anim-timestamp {
+    animation: none !important;
+    transition: none !important;
+  }
+}

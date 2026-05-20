@@ -6,29 +6,30 @@ is built on aiohttp with a single asyncio event loop.
 
 Routes:
 
-- ``GET /healthz``         → ``{"status": "ok"}`` (liveness)
-- ``GET /api/state``       → ``naml.project_state.build_hierarchy(cfg)`` with
-                             weak ETag + ``If-None-Match`` 304 short-circuit.
-- ``GET /state``           → ``{}`` placeholder kept for ``naml status``
-                             callers; real cockpit telemetry rides on
-                             ``/events``.
-- ``GET /events``          → SSE stream (slice-11). Emits a ``snapshot``
-                             event first, ``ping`` every 2s, and
-                             ``state-update`` whenever a sprint/slice state
-                             file changes. Honours ``Last-Event-ID``.
-- ``GET /aggregates``      → ``Aggregator.snapshot()`` — token/cost rollups.
-- ``POST /aggregates/reset`` → recompute aggregates from disk (Settings →
-                             Advanced → Reset Aggregates).
-- ``POST /intervene/{id}`` → drawer intervention endpoint (slice-7).
-                             ``?action=`` is one of ``hold``, ``fail``,
-                             ``skip``, ``open-terminal``. The first three
-                             are recorded as intent and answered 200; the
-                             real state transitions land in slice-14.
-                             ``open-terminal`` shells out to
-                             ``open -a Terminal`` (macOS) so the user can
-                             ``claude --resume`` a paused slice.
-- ``GET /``                → served from ``web/dist/`` when the bundle exists;
-                             404 otherwise (Vite owns development).
+- ``GET /healthz``                 → ``{"status": "ok"}`` (liveness)
+- ``GET /api/state``               → ``naml.project_state.build_hierarchy(cfg)``
+                                     with weak ETag + ``If-None-Match`` 304.
+- ``GET /state``                   → ``{}`` placeholder kept for ``naml status``
+                                     callers; real cockpit telemetry rides on
+                                     ``/events``.
+- ``GET /events``                  → SSE stream (slice-11). Emits a ``snapshot``
+                                     event first, ``ping`` every 2s, and
+                                     ``state-update`` whenever a sprint/slice
+                                     state file changes. Honours
+                                     ``Last-Event-ID``.
+- ``GET /aggregates``              → ``Aggregator.snapshot()`` (slice-10).
+- ``POST /aggregates/reset``       → recompute aggregates from disk.
+- ``POST /intervene/{id}``         → drawer intervention endpoint (slice-7).
+                                     ``?action=`` is ``hold``/``fail``/``skip``/
+                                     ``open-terminal``.
+- ``GET /api/feedback-inbox``      → JSON view of ``docs/feedback/inbox.md``
+                                     for the Dashboard sidecar (slice-13).
+- ``GET /api/aggregates-history``  → JSONL view of
+                                     ``state/aggregates-history.jsonl`` —
+                                     daily rollups for Settings → Health
+                                     trend graphs (slice-13).
+- ``GET /``                        → served from ``web/dist/`` when the bundle
+                                     exists; 404 otherwise.
 
 The aggregator is owned by the ``Application`` instance — one per server.
 Cold-start replay runs in :func:`build_app` so the snapshot is warm before
@@ -51,6 +52,8 @@ from typing import Any
 
 from aiohttp import web
 
+from . import aggregates_history as aggregates_history_mod
+from . import feedback_inbox as feedback_inbox_mod
 from . import project_state as project_state_mod
 from . import state as state_mod
 from .aggregator import Aggregator
@@ -177,6 +180,73 @@ async def _handle_aggregates_reset(request: web.Request) -> web.Response:
         log.exception("/aggregates/reset failed")
         return web.Response(status=500, text="internal error")
     return web.json_response({"status": "ok", "events_replayed": count})
+
+
+def _resolve_inbox_path(cfg: Any) -> Path:
+    """Honor the ``[paths] feedback_inbox`` config knob, fall back to the
+    documented default. Resolves relative paths against ``cfg.repo_root``.
+    """
+    repo_root = Path(getattr(cfg, "repo_root", ".")).resolve()
+    candidate = getattr(cfg, "feedback_inbox", None)
+    if candidate is None:
+        paths_cfg = getattr(cfg, "paths", None)
+        candidate = getattr(paths_cfg, "feedback_inbox", None) if paths_cfg else None
+    if candidate is None:
+        candidate = "docs/feedback/inbox.md"
+    path = Path(str(candidate))
+    if not path.is_absolute():
+        path = repo_root / path
+    return path
+
+
+def _resolve_history_path(cfg: Any) -> Path:
+    """Locate ``state/aggregates-history.jsonl`` relative to the repo root.
+
+    A custom location can be wired in via ``cfg.aggregates_history_path`` or
+    the ``paths.aggregates_history`` config knob; both are optional.
+    """
+    repo_root = Path(getattr(cfg, "repo_root", ".")).resolve()
+    candidate = getattr(cfg, "aggregates_history_path", None)
+    if candidate is None:
+        paths_cfg = getattr(cfg, "paths", None)
+        candidate = (
+            getattr(paths_cfg, "aggregates_history", None) if paths_cfg else None
+        )
+    if candidate is None:
+        candidate = "state/aggregates-history.jsonl"
+    path = Path(str(candidate))
+    if not path.is_absolute():
+        path = repo_root / path
+    return path
+
+
+def _make_feedback_inbox_handler(cfg: Any):
+    async def _handler(_request: web.Request) -> web.Response:
+        try:
+            payload = feedback_inbox_mod.build_response(_resolve_inbox_path(cfg))
+        except Exception:  # noqa: BLE001 — defence in depth
+            log.exception("/api/feedback-inbox handler failed")
+            return web.Response(status=500, text="internal error")
+        return web.json_response(payload)
+    return _handler
+
+
+def _make_aggregates_history_handler(cfg: Any):
+    async def _handler(request: web.Request) -> web.Response:
+        try:
+            days = int(request.query.get("days", "30"))
+        except ValueError:
+            return web.Response(status=400, text="days must be an integer")
+        days = max(1, min(days, 365))
+        try:
+            payload = aggregates_history_mod.build_response(
+                _resolve_history_path(cfg), days=days
+            )
+        except Exception:  # noqa: BLE001 — defence in depth
+            log.exception("/api/aggregates-history handler failed")
+            return web.Response(status=500, text="internal error")
+        return web.json_response(payload)
+    return _handler
 
 
 def _make_index_handler(dist_dir: Path):
@@ -656,6 +726,10 @@ def build_app(
 
     app.router.add_get("/healthz", _handle_healthz)
     app.router.add_get("/api/state", _make_api_state_handler(cfg))
+    app.router.add_get("/api/feedback-inbox", _make_feedback_inbox_handler(cfg))
+    app.router.add_get(
+        "/api/aggregates-history", _make_aggregates_history_handler(cfg)
+    )
     app.router.add_get("/state", _handle_state_placeholder)
     app.router.add_get("/events", _make_events_handler(cfg))
     app.router.add_get("/aggregates", _handle_aggregates_get)

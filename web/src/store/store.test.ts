@@ -1,79 +1,99 @@
-// Unit tests for the cockpit store. Exercises the patch + subscribe API
-// without going through the SSE wrapper, so failures here can be diagnosed
-// in isolation.
+import { describe, expect, it, vi } from "vitest";
 
-import { describe, expect, it } from "vitest";
+import { Store, sliceKey, sprintKey } from "./store.ts";
+import { type SliceSummary, emptyStore } from "./types.ts";
 
-import { createStore } from ".";
+function makeSlice(id: string, state: SliceSummary["state"] = "work"): SliceSummary {
+  return {
+    id,
+    sprintId: "sprint-1",
+    title: `Slice ${id}`,
+    state,
+    lane: 1,
+    updatedAt: "2026-05-20T00:00:00.000Z",
+  };
+}
 
-describe("store", () => {
-  it("applies a snapshot, replacing sprints/slices/aggregates", () => {
-    const store = createStore();
-    store.applySnapshot(
-      {
-        ts: "now",
-        sprints: { A: { sprint_id: "A", state: "executing" } },
-        slices: { "A::s1": { slice_id: "s1", state: "work" } },
-        aggregates: { foo: 1 },
-      },
-      10,
-    );
-    const s = store.getState();
-    expect(s.sprints.A?.state).toBe("executing");
-    expect(s.slices["A::s1"]?.state).toBe("work");
-    expect(s.aggregates.foo).toBe(1);
-    expect(s.lastEventId).toBe(10);
+describe("Store", () => {
+  it("starts in `connecting` sync state with empty rollups", () => {
+    const s = new Store();
+    const state = s.getState();
+    expect(state.syncStatus).toBe("connecting");
+    expect(state.sprints).toEqual({});
+    expect(state.project_metrics.lifetime_cost).toBe(0);
+    expect(state.transitions).toEqual([]);
   });
 
-  it("merges a state-update on top of existing state", () => {
-    const store = createStore();
-    store.applySnapshot(
-      {
-        ts: "now",
-        sprints: {},
-        slices: {
-          "A::s1": { slice_id: "s1", state: "work" },
-          "A::s2": { slice_id: "s2", state: "pending" },
-        },
-        aggregates: {},
-      },
-      1,
-    );
-    store.applyStateUpdate(
-      {
-        kind: "slice",
-        id: "A::s1",
-        delta: { slice_id: "s1", state: "pr" },
-      },
-      2,
-    );
-    const s = store.getState();
-    // Both slices remain; only s1 changed.
-    expect(s.slices["A::s1"]?.state).toBe("pr");
-    expect(s.slices["A::s2"]?.state).toBe("pending");
+  it("patch fires keyed subscribers only for the changed top-level field", () => {
+    const s = new Store();
+    const syncCb = vi.fn();
+    const metricCb = vi.fn();
+    s.subscribeKey("syncStatus", syncCb);
+    s.subscribeKey("project_metrics", metricCb);
+
+    s.patch("syncStatus", "live");
+    expect(syncCb).toHaveBeenCalledTimes(1);
+    expect(metricCb).not.toHaveBeenCalled();
   });
 
-  it("subscribeKey only fires when that key actually changes", () => {
-    const store = createStore();
-    let count = 0;
-    store.subscribeKey("syncStatus", () => {
-      count++;
+  it("patchSlice notifies the slice's keyed subscribers and the `slices` bag", () => {
+    const s = new Store();
+    const sliceCb = vi.fn();
+    const bagCb = vi.fn();
+    const otherCb = vi.fn();
+    s.subscribeKey(sliceKey("a"), sliceCb);
+    s.subscribeKey("slices", bagCb);
+    s.subscribeKey(sliceKey("b"), otherCb);
+
+    s.patchSlice("a", makeSlice("a"));
+    expect(sliceCb).toHaveBeenCalledTimes(1);
+    expect(bagCb).toHaveBeenCalledTimes(1);
+    expect(otherCb).not.toHaveBeenCalled();
+  });
+
+  it("patchSprint notifies the right subscribers", () => {
+    const s = new Store();
+    const cb = vi.fn();
+    s.subscribeKey(sprintKey("sprint-1"), cb);
+    s.patchSprint("sprint-1", {
+      id: "sprint-1",
+      title: "Sprint 1",
+      state: "executing",
+      slicesDone: 1,
+      slicesTotal: 3,
+      updatedAt: "2026-05-20T00:00:00.000Z",
     });
-    store.setSyncStatus("connected");
-    store.setSyncStatus("connected"); // no-op
-    store.setSyncStatus("slow");
-    expect(count).toBe(2);
+    expect(cb).toHaveBeenCalledTimes(1);
   });
 
-  it("subscribe returns an unsubscribe function", () => {
-    const store = createStore();
-    let count = 0;
-    const off = store.subscribe(() => {
-      count++;
-    });
-    store.setSyncStatus("connected");
+  it("setState diffs against current and notifies only changed keys", () => {
+    const init = emptyStore();
+    const s = new Store(init);
+    const syncCb = vi.fn();
+    const slicesCb = vi.fn();
+    s.subscribeKey("syncStatus", syncCb);
+    s.subscribeKey("slices", slicesCb);
+
+    s.setState({ ...init, syncStatus: "live" });
+    expect(syncCb).toHaveBeenCalledTimes(1);
+    expect(slicesCb).toHaveBeenCalledTimes(0);
+  });
+
+  it("unsubscribe removes the listener", () => {
+    const s = new Store();
+    const cb = vi.fn();
+    const off = s.subscribeKey("syncStatus", cb);
     off();
-    store.setSyncStatus("slow");
-    expect(count).toBe(1);
+    s.patch("syncStatus", "live");
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op when patched with the same value", () => {
+    const s = new Store();
+    const cb = vi.fn();
+    s.subscribeKey("syncStatus", cb);
+    // initial value is `connecting`; re-patching is a no-op
+    s.patch("syncStatus", "connecting");
+    expect(cb).not.toHaveBeenCalled();
   });
 });
