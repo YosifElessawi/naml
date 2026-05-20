@@ -19,9 +19,10 @@ Routes:
                                      ``Last-Event-ID``.
 - ``GET /aggregates``              → ``Aggregator.snapshot()`` (slice-10).
 - ``POST /aggregates/reset``       → recompute aggregates from disk.
-- ``POST /intervene/{id}``         → drawer intervention endpoint (slice-7).
-                                     ``?action=`` is ``hold``/``fail``/``skip``/
-                                     ``open-terminal``.
+- ``POST /intervene/{id}``         → drawer intervention endpoint (slice-7 +
+                                     slice-14). ``?action=`` is one of
+                                     ``hold`` / ``resume`` / ``mark-failed`` /
+                                     ``skip`` / ``open-terminal``.
 - ``GET /api/feedback-inbox``      → JSON view of ``docs/feedback/inbox.md``
                                      for the Dashboard sidecar (slice-13).
 - ``GET /api/aggregates-history``  → JSONL view of
@@ -42,7 +43,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import platform
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -56,6 +59,7 @@ from . import aggregates_history as aggregates_history_mod
 from . import feedback_inbox as feedback_inbox_mod
 from . import project_state as project_state_mod
 from . import state as state_mod
+from . import states
 from .aggregator import Aggregator
 from .sse import Broadcaster, SSEEvent, encode_event
 from .watcher import replay_all
@@ -101,7 +105,16 @@ WATCHER_TASK_KEY: web.AppKey[Any] = web.AppKey("watcher_task", object)
 _SESSION_ID_RE = re.compile(r"^[0-9a-fA-F-]{1,128}$")
 
 
+# Actions accepted by ``POST /intervene/{slice_id}?action=`` (slice-14).
+# Centralised so the test suite and the browser can stay in sync; the
+# dispatch table in ``_intervene_response`` is keyed by the same strings.
+INTERVENE_ACTIONS: frozenset[str] = frozenset({
+    "hold", "resume", "mark-failed", "skip", "open-terminal",
+})
+
+
 # --- /api/state (kept for backwards-compat with naml status) --------------
+
 
 
 
@@ -246,6 +259,222 @@ def _make_aggregates_history_handler(cfg: Any):
             log.exception("/api/aggregates-history handler failed")
             return web.Response(status=500, text="internal error")
         return web.json_response(payload)
+    return _handler
+
+
+# --- /intervene: slice-14 supersedes slice-7's stubbed handler ----------
+
+def _resolve_sprint_root_for_slice(
+    cfg: Any, slice_id: str
+) -> tuple[Path, state_mod.SliceStatus] | None:
+    """Find the on-disk sprint root that owns ``slice_id``.
+
+    Returns ``(sprint_root, slice_status)`` or ``None`` if no sprint contains
+    a status file for ``slice_id``. The current sprint (per project state)
+    is checked first; if not found there, all sprint directories are
+    scanned. That fallback matters for the cockpit: a user can browse a
+    finished sprint and the drawer still needs to address its slices.
+    """
+    sprints_path = Path(getattr(cfg, "sprints_path", ""))
+    if not sprints_path.is_dir():
+        return None
+
+    project = project_state_mod.load_project_state(
+        project_state_mod.naml_dir_for(cfg)
+    )
+    ordered_ids: list[str] = []
+    if project.current_sprint:
+        ordered_ids.append(project.current_sprint)
+    for entry in sorted(sprints_path.iterdir()):
+        if not entry.is_dir():
+            continue
+        if entry.name in ordered_ids:
+            continue
+        ordered_ids.append(entry.name)
+
+    for sprint_id in ordered_ids:
+        sprint_root = sprints_path / sprint_id
+        status = state_mod.load_slice_status(sprint_root, slice_id)
+        if status is not None:
+            return sprint_root, status
+    return None
+
+
+def _open_terminal_macos(worktree: Path, session_id: str) -> bool:
+    """Spawn Terminal.app at ``worktree`` running ``claude --resume``.
+
+    Returns True iff the AppleScript invocation succeeded. On non-macOS
+    platforms the caller should refuse before reaching here; we still
+    double-check to avoid blowing up if a downstream caller forgets.
+    """
+    if platform.system() != "Darwin":
+        return False
+    cwd = shlex.quote(str(worktree))
+    resume_arg = shlex.quote(session_id) if session_id else ""
+    inner = f"cd {cwd} && claude --resume {resume_arg}".rstrip()
+    script = (
+        'tell application "Terminal" to do script '
+        f'"{inner}"'
+    )
+    try:
+        subprocess.run(  # noqa: S603 — argv constructed, not a shell string
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        log.warning("open-terminal failed: %s", exc)
+        return False
+    return True
+
+
+def _intervene_response(
+    cfg: Any,
+    slice_id: str,
+    action: str,
+) -> web.Response:
+    """Dispatch one intervention. Pure-ish so the tests can drive it directly.
+
+    Centralises validation + state-machine transitions for HOLD/RESUME/etc.
+    Returns the same kind of ``web.Response`` an aiohttp handler would.
+    """
+    if not action:
+        return web.json_response(
+            {"error": "missing required query parameter 'action'"},
+            status=400,
+        )
+    if action not in INTERVENE_ACTIONS:
+        return web.json_response(
+            {
+                "error": f"unknown action {action!r}",
+                "valid_actions": sorted(INTERVENE_ACTIONS),
+            },
+            status=400,
+        )
+
+    located = _resolve_sprint_root_for_slice(cfg, slice_id)
+    if located is None:
+        return web.json_response(
+            {"error": f"no slice with id {slice_id!r} in any sprint"},
+            status=404,
+        )
+    sprint_root, status = located
+
+    if action == "hold":
+        # Idempotent: writing the sentinel signals the lane; the lane
+        # itself flips the slice state to ``held`` once the in-flight
+        # turn settles. We don't transition here — that would race with
+        # the lane.
+        state_mod.write_hold_requested(sprint_root, slice_id)
+        return web.json_response({
+            "ok": True,
+            "slice_id": slice_id,
+            "action": action,
+            "detail": "hold requested — lane will park after current turn",
+            "current_state": status.state,
+        })
+
+    if action == "resume":
+        # Clearing the sentinel wakes the lane's spin loop, which then
+        # transitions the slice back to ``work``.
+        state_mod.clear_hold_requested(sprint_root, slice_id)
+        return web.json_response({
+            "ok": True,
+            "slice_id": slice_id,
+            "action": action,
+            "detail": "resume requested — lane will re-engage",
+            "current_state": status.state,
+        })
+
+    if action == "mark-failed":
+        status.state = states.FAILED
+        status.last_error = status.last_error or "marked failed via cockpit"
+        status.record_transition(
+            state=states.FAILED, detail="marked failed via cockpit"
+        )
+        state_mod.save_slice_status(sprint_root, status)
+        # Best-effort — if the user marks failed while held, drop the
+        # sentinel too so a stray RESUME doesn't restart the lane.
+        state_mod.clear_hold_requested(sprint_root, slice_id)
+        return web.json_response({
+            "ok": True,
+            "slice_id": slice_id,
+            "action": action,
+            "current_state": status.state,
+        })
+
+    if action == "skip":
+        status.state = states.ABANDONED
+        status.record_transition(
+            state=states.ABANDONED, detail="skipped via cockpit"
+        )
+        state_mod.save_slice_status(sprint_root, status)
+        state_mod.clear_hold_requested(sprint_root, slice_id)
+        return web.json_response({
+            "ok": True,
+            "slice_id": slice_id,
+            "action": action,
+            "current_state": status.state,
+        })
+
+    # open-terminal — only allowed in resting states. The drawer also
+    # gates client-side, but the server is the source of truth: a
+    # stale UI shouldn't be able to interrupt an in-flight session.
+    if status.state not in states.TERMINAL_UNLOCKED_STATES:
+        return web.json_response(
+            {
+                "error": (
+                    f"slice is in {status.state!r}; opening a terminal would "
+                    "interrupt naml's session. Press HOLD first."
+                ),
+                "current_state": status.state,
+            },
+            status=409,
+        )
+    if platform.system() != "Darwin":
+        return web.json_response(
+            {
+                "error": (
+                    "open-terminal is macOS-only for now. Use the worktree "
+                    "path printed in the drawer with your own terminal."
+                ),
+                "worktree": status.worktree,
+            },
+            status=501,
+        )
+    if not status.worktree:
+        return web.json_response(
+            {"error": "slice has no recorded worktree path"},
+            status=409,
+        )
+
+    ok = _open_terminal_macos(Path(status.worktree), status.session_id)
+    if not ok:
+        return web.json_response(
+            {"error": "Terminal.app launch failed; see naml server logs"},
+            status=500,
+        )
+    return web.json_response({
+        "ok": True,
+        "slice_id": slice_id,
+        "action": action,
+        "worktree": status.worktree,
+        "current_state": status.state,
+    })
+
+
+def _make_intervene_handler(cfg: Any):
+    async def _handler(request: web.Request) -> web.Response:
+        slice_id = request.match_info.get("slice_id", "")
+        action = request.query.get("action", "").strip()
+        try:
+            return _intervene_response(cfg, slice_id, action)
+        except Exception:  # noqa: BLE001 — server stays up on bad input
+            log.exception("/intervene/%s?action=%s failed", slice_id, action)
+            return web.json_response(
+                {"error": "internal error processing intervention"},
+                status=500,
+            )
     return _handler
 
 
@@ -406,155 +635,6 @@ def _make_events_handler(cfg: Any):
             broadcaster.unregister(queue)
 
         return resp
-
-    return _handler
-
-
-# --- /intervene: drawer intervention endpoint (slice-7) ------------------
-
-_VALID_ACTIONS = ("hold", "fail", "skip", "open-terminal")
-
-
-def _slice_worktree(cfg: Any, slice_id: str) -> Path | None:
-    """Best-effort lookup of the worktree path for a slice. Returns ``None``
-    if the project state hierarchy doesn't know about the slice yet — the
-    ``open-terminal`` handler then falls back to the repo root."""
-    try:
-        payload = project_state_mod.build_hierarchy(cfg)
-    except Exception:  # noqa: BLE001 — telemetry-only path
-        return None
-    sprints = payload.get("sprints") if isinstance(payload, dict) else None
-    if not isinstance(sprints, list):
-        return None
-    for sprint in sprints:
-        for sl in sprint.get("slices", []) if isinstance(sprint, dict) else []:
-            if not isinstance(sl, dict):
-                continue
-            if sl.get("id") == slice_id or sl.get("slice_id") == slice_id:
-                wt = sl.get("worktree") or sl.get("worktree_path")
-                if wt:
-                    return Path(str(wt))
-    return None
-
-
-_OSASCRIPT_RUNNER = (
-    'on run argv\n'
-    '    set wt to item 1 of argv\n'
-    '    set sid to item 2 of argv\n'
-    '    set cmd to "cd " & quoted form of wt & " && claude --resume " & sid\n'
-    '    tell application "Terminal" to do script cmd\n'
-    'end run'
-)
-
-
-def _spawn_terminal(worktree: Path, session_id: str | None) -> bool:
-    """Open a new Terminal window at ``worktree`` running ``claude --resume``.
-    Returns ``True`` if the shell-out launched, ``False`` otherwise. macOS
-    only — on Linux/Windows the cockpit currently can't honour the action.
-
-    ``session_id`` must already be validated against ``_SESSION_ID_RE`` by
-    the caller; we re-validate as defence-in-depth so this function is safe
-    to call from any future code path. The worktree path is passed through
-    AppleScript's ``quoted form of`` rather than f-stringed into the shell
-    literal, so it can't break out of the inner string either.
-    """
-    if sys.platform != "darwin":
-        return False
-    if not shutil.which("open"):
-        return False
-    if session_id:
-        if not _SESSION_ID_RE.fullmatch(session_id):
-            log.warning(
-                "rejecting open-terminal: session_id failed validation",
-            )
-            return False
-        try:
-            subprocess.Popen(  # noqa: S603 — argv list, no shell=True
-                [
-                    "osascript",
-                    "-e",
-                    _OSASCRIPT_RUNNER,
-                    str(worktree),
-                    session_id,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            return True
-        except OSError:
-            return False
-    # No session yet — just open a Terminal at the worktree.
-    try:
-        subprocess.Popen(  # noqa: S603 — argv list, no shell=True
-            ["open", "-a", "Terminal", "-n", str(worktree)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        return True
-    except OSError:
-        return False
-
-
-def _make_intervene_handler(cfg: Any):
-    """Drawer intervention endpoint. The real state-machine wiring for
-    ``hold`` lands in slice-14; until then we 200 so the UI can show its
-    flash. ``open-terminal`` does shell out today."""
-
-    async def _handler(request: web.Request) -> web.Response:
-        slice_id = request.match_info.get("slice_id", "").strip()
-        action = (request.rel_url.query.get("action") or "").strip()
-
-        if not slice_id:
-            return web.json_response({"error": "missing slice_id"}, status=400)
-        if action not in _VALID_ACTIONS:
-            return web.json_response(
-                {
-                    "error": f"unknown action {action!r}",
-                    "valid": list(_VALID_ACTIONS),
-                },
-                status=400,
-            )
-
-        log.info("intervene: slice=%s action=%s", slice_id, action)
-
-        if action == "open-terminal":
-            session_id = request.rel_url.query.get("session_id")
-            # Reject malformed session-ids at the boundary so the spawn
-            # path can never see anything that would let an attacker
-            # break out of the AppleScript / shell quoting layers.
-            if session_id is not None and not _SESSION_ID_RE.fullmatch(session_id):
-                return web.json_response(
-                    {
-                        "error": "invalid session_id",
-                        "expected": "^[0-9a-fA-F-]{1,128}$",
-                    },
-                    status=400,
-                )
-            worktree = _slice_worktree(cfg, slice_id) or Path(
-                getattr(cfg, "repo_root", ".")
-            )
-            launched = _spawn_terminal(worktree, session_id)
-            return web.json_response(
-                {
-                    "status": "ok" if launched else "noop",
-                    "action": action,
-                    "slice_id": slice_id,
-                    "launched": launched,
-                    "worktree": str(worktree),
-                },
-                status=200 if launched else 202,
-            )
-
-        # hold / fail / skip — stubbed until slice-14 wires real semantics.
-        return web.json_response(
-            {
-                "status": "accepted",
-                "action": action,
-                "slice_id": slice_id,
-                "note": "stub handler — real state transition lands in slice-14",
-            },
-            status=200,
-        )
 
     return _handler
 

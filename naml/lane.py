@@ -174,6 +174,47 @@ def _transition(
     state_mod.save_slice_status(sprint_root, status)
 
 
+# How often the lane polls the HOLD sentinel while parked. 1s is fast
+# enough to feel responsive when the user clicks RESUME in the cockpit
+# and slow enough that the spin loop is invisible in CPU profiles.
+_HOLD_POLL_INTERVAL_SECONDS = 1.0
+
+
+def _await_hold_clearance(
+    status: state_mod.SliceStatus,
+    sprint_root: Path,
+    *,
+    return_to: str = states.WORK,
+    poll_interval: float = _HOLD_POLL_INTERVAL_SECONDS,
+) -> None:
+    """If the HOLD sentinel exists, transition to ``held`` and block until cleared.
+
+    Called between Claude turns. The current turn has already settled by the
+    time this runs — we never kill a mid-stream implementer; HOLD always
+    waits for the turn to finish. On sentinel removal the slice is
+    transitioned back to ``return_to`` (default ``work``) and execution
+    resumes. No-op when the sentinel is absent at call time.
+
+    ``poll_interval`` is exposed so tests can drive the loop quickly.
+    """
+    if not state_mod.is_hold_requested(sprint_root, status.slice_id):
+        return
+    _transition(
+        status,
+        states.HELD,
+        sprint_root=sprint_root,
+        detail="HOLD requested — paused after turn",
+    )
+    while state_mod.is_hold_requested(sprint_root, status.slice_id):
+        time.sleep(poll_interval)
+    _transition(
+        status,
+        return_to,
+        sprint_root=sprint_root,
+        detail="RESUME — re-engaging lane",
+    )
+
+
 # --- the lane entry point ------------------------------------------------
 
 def process_slice(slice_id: str, ctx: LaneContext) -> str:
@@ -246,6 +287,8 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
 
         # ----- work + gates loop -----
         _transition(status, "work", sprint_root=sprint_root)
+        # Honour a HOLD pressed between setup and the first Claude turn.
+        _await_hold_clearance(status, sprint_root)
         tokens_jsonl = state_mod.tokens_path(sprint_root, slice_id)
         result = run_implementer(
             prompt=prompt_text,
@@ -263,6 +306,8 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
         )
         if not _result_ok(result, status, sprint_root):
             return status.state
+        # Current turn settled — honour any HOLD requested mid-turn.
+        _await_hold_clearance(status, sprint_root)
 
         gate_result = run_gates(
             cfg.gates,
@@ -292,6 +337,8 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
             )
             if not _result_ok(result, status, sprint_root):
                 return status.state
+            # Honour HOLD between gate-fix turns too.
+            _await_hold_clearance(status, sprint_root)
             gate_result = run_gates(
                 cfg.gates, cwd=worktree, log_path=log_path
             )
@@ -487,6 +534,7 @@ def _drive_review_loop(
         # Resume the implementer in its original session with the review text.
         _transition(status, states.WORK, sprint_root=sprint_root,
                     detail=f"applying review (attempt {attempt})")
+        _await_hold_clearance(status, sprint_root)
         fix_prompt = prompts.request_changes_prompt(
             review_text=review_result.final_text,
             pr_url=status.pr_url,
@@ -506,6 +554,7 @@ def _drive_review_loop(
         )
         if not _result_ok(impl_result, status, sprint_root):
             return status.state
+        _await_hold_clearance(status, sprint_root)
 
         # Re-run gates so we don't push known-bad code back to the PR.
         gate_result = run_gates(cfg.gates, cwd=worktree, log_path=log_path)
@@ -530,6 +579,7 @@ def _drive_review_loop(
             )
             if not _result_ok(impl_result, status, sprint_root):
                 return status.state
+            _await_hold_clearance(status, sprint_root)
             gate_result = run_gates(cfg.gates, cwd=worktree, log_path=log_path)
 
         if not gate_result.passed:

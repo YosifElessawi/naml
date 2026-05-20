@@ -29,6 +29,7 @@ STATE_DIRNAME = "state"
 SUMMARY_FILENAME = "{slice_id}.summary.md"
 STATUS_FILENAME = "{slice_id}.status.json"
 TOKENS_FILENAME = "{slice_id}.tokens.jsonl"
+HOLD_REQUESTED_FILENAME = "{slice_id}.hold_requested"
 SPRINT_STATE_FILENAME = "sprint.json"
 MERGE_LOG_FILENAME = "merge-log.json"
 
@@ -245,6 +246,39 @@ def tokens_path(sprint_root: Path, slice_id: str) -> Path:
 
 def sprint_state_path(sprint_root: Path) -> Path:
     return state_dir(sprint_root) / SPRINT_STATE_FILENAME
+
+
+def hold_requested_path(sprint_root: Path, slice_id: str) -> Path:
+    """Path of the zero-byte sentinel file that signals "user pressed HOLD".
+
+    The lane worker polls for this file before each Claude turn and, when
+    present, settles the in-flight turn and transitions the slice to
+    ``held``. The file persists across naml-run invocations — the lane
+    only re-enters ``work`` when the sentinel is removed by RESUME.
+    """
+    return state_dir(sprint_root) / HOLD_REQUESTED_FILENAME.format(slice_id=slice_id)
+
+
+def is_hold_requested(sprint_root: Path, slice_id: str) -> bool:
+    """True if the HOLD sentinel exists for ``slice_id``."""
+    return hold_requested_path(sprint_root, slice_id).exists()
+
+
+def write_hold_requested(sprint_root: Path, slice_id: str) -> None:
+    """Create the zero-byte HOLD sentinel. Idempotent."""
+    ensure_state_dir(sprint_root)
+    p = hold_requested_path(sprint_root, slice_id)
+    if not p.exists():
+        p.write_bytes(b"")
+
+
+def clear_hold_requested(sprint_root: Path, slice_id: str) -> None:
+    """Remove the HOLD sentinel. Idempotent — no error if it's already gone."""
+    p = hold_requested_path(sprint_root, slice_id)
+    try:
+        p.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def ensure_state_dir(sprint_root: Path) -> None:
