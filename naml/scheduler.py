@@ -226,6 +226,16 @@ class Scheduler:
                 # just reset. Treat the same as "no status file": let the
                 # lane pick it up normally.
                 continue
+            elif status.state == states.HELD:
+                # User pressed HOLD before the previous naml run died.
+                # Don't auto-recover — both the sentinel file and the
+                # ``held`` status are durable signals the user explicitly
+                # wants this slice parked. Re-create the sentinel if it
+                # somehow disappeared so the lane re-enters the held spin
+                # loop on the next turn check. Leave scheduler-status at
+                # the default ``pending`` so the lane will reclaim it.
+                state_mod.write_hold_requested(sprint_root, sid)
+                continue
             else:
                 # Orphan: non-terminal on-disk state with no live process
                 # owning it. The previous naml run died (kill -9, crash,

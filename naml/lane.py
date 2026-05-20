@@ -174,6 +174,51 @@ def _transition(
     state_mod.save_slice_status(sprint_root, status)
 
 
+# How often the lane polls the HOLD sentinel while parked. 1s is fast
+# enough to feel responsive when the user clicks RESUME in the cockpit
+# and slow enough that the spin loop is invisible in CPU profiles.
+_HOLD_POLL_INTERVAL_SECONDS = 1.0
+
+
+def _await_hold_clearance(
+    status: state_mod.SliceStatus,
+    sprint_root: Path,
+    *,
+    return_to: str = states.WORK,
+    poll_interval: float = _HOLD_POLL_INTERVAL_SECONDS,
+) -> None:
+    """If the HOLD sentinel exists, transition to ``held`` and block until cleared.
+
+    Called between Claude turns. The current turn has already settled by the
+    time this runs — we never kill a mid-stream implementer; HOLD always
+    waits for the turn to finish. On sentinel removal the slice is
+    transitioned back to ``return_to`` (default ``work``) and execution
+    resumes. No-op when the sentinel is absent at call time.
+
+    ``poll_interval`` is exposed so tests can drive the loop quickly.
+    """
+    if not state_mod.is_hold_requested(sprint_root, status.slice_id):
+        return
+    # Don't record a second held→held transition on cross-restart resume,
+    # when the slice is already in ``held`` from a previous naml run. Two
+    # adjacent identical transitions would clutter the cockpit timeline.
+    if status.state != states.HELD:
+        _transition(
+            status,
+            states.HELD,
+            sprint_root=sprint_root,
+            detail="HOLD requested — paused after turn",
+        )
+    while state_mod.is_hold_requested(sprint_root, status.slice_id):
+        time.sleep(poll_interval)
+    _transition(
+        status,
+        return_to,
+        sprint_root=sprint_root,
+        detail="RESUME — re-engaging lane",
+    )
+
+
 # --- the lane entry point ------------------------------------------------
 
 def process_slice(slice_id: str, ctx: LaneContext) -> str:
@@ -195,35 +240,61 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
     log_path = _slice_log_path(ctx.log_dir, sprint.id, slice_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    try:
-        # ----- setup -----
-        _transition(status, "setup", sprint_root=sprint_root)
-        worktree = gitops.lane_worktree_path(
-            lane_root=ctx.lane_root,
-            repo_slug=cfg.repo,
-            sprint_id=sprint.id,
-            slice_id=slice_id,
-        )
-        gitops.worktree_add(
-            worktree,
-            repo_root=cfg.repo_root,
-            base_branch=cfg.base_branch,
-            symlinks=cfg.worktree_symlinks,
-        )
-        branch = _branch_name_for(sprint.id, slice_id)
-        gitops.create_branch_from_base(
-            branch, cwd=worktree, base_branch=cfg.base_branch
-        )
-        status.worktree = str(worktree)
-        status.branch = branch
+    # Cross-restart HELD resume. If a previous naml run died while this
+    # slice was held, the on-disk status is ``held`` and the worktree +
+    # session_id are still valid (the absorb-existing-statuses path
+    # explicitly preserves them, unlike orphan recovery). Fast-forward
+    # past setup: re-use the existing worktree, keep the session_id, park
+    # in the spin loop until the sentinel is cleared, then drop into the
+    # work loop with resume=True so we re-enter the implementer's session
+    # rather than starting a fresh one (which would lose all context).
+    is_held_resume = (
+        status.state == states.HELD
+        and bool(status.worktree)
+        and bool(status.session_id)
+        and bool(status.branch)
+        and Path(status.worktree).exists()
+    )
 
-        # Always generate a fresh session_id when a lane claims a slice.
-        # Reusing an old session_id from a previous naml run causes Claude
-        # to reject the spawn with "Session ID already in use". Resume of
-        # partial work within a single attempt is handled by the work-loop
-        # retry; across naml-run invocations, every attempt is a fresh
-        # session.
-        _fresh_session_id(status)
+    try:
+        if is_held_resume:
+            worktree = Path(status.worktree)
+            branch = status.branch
+            log.info(
+                "[%s] resuming HELD slice — worktree %s, session %s",
+                slice_id, worktree, status.session_id[:8],
+            )
+            # Park until the sentinel is cleared; then back to ``work``.
+            _await_hold_clearance(status, sprint_root)
+        else:
+            # ----- setup -----
+            _transition(status, "setup", sprint_root=sprint_root)
+            worktree = gitops.lane_worktree_path(
+                lane_root=ctx.lane_root,
+                repo_slug=cfg.repo,
+                sprint_id=sprint.id,
+                slice_id=slice_id,
+            )
+            gitops.worktree_add(
+                worktree,
+                repo_root=cfg.repo_root,
+                base_branch=cfg.base_branch,
+                symlinks=cfg.worktree_symlinks,
+            )
+            branch = _branch_name_for(sprint.id, slice_id)
+            gitops.create_branch_from_base(
+                branch, cwd=worktree, base_branch=cfg.base_branch
+            )
+            status.worktree = str(worktree)
+            status.branch = branch
+
+            # Always generate a fresh session_id when a lane claims a slice.
+            # Reusing an old session_id from a previous naml run causes Claude
+            # to reject the spawn with "Session ID already in use". Resume of
+            # partial work within a single attempt is handled by the work-loop
+            # retry; across naml-run invocations, every attempt is a fresh
+            # session.
+            _fresh_session_id(status)
 
         # Compose prompt with upstream summaries.
         upstream = _collect_upstream_summaries(sprint_root, slice_)
@@ -245,24 +316,44 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
         )
 
         # ----- work + gates loop -----
-        _transition(status, "work", sprint_root=sprint_root)
+        # Held-resume already transitioned to ``work`` via _await_hold_clearance;
+        # don't re-record that transition (it would split the timeline). For
+        # fresh setup we transition normally and honour any HOLD pressed
+        # between setup and the first Claude turn.
+        if not is_held_resume:
+            _transition(status, "work", sprint_root=sprint_root)
+            _await_hold_clearance(status, sprint_root)
         tokens_jsonl = state_mod.tokens_path(sprint_root, slice_id)
+        # Held-resume: send the "continue your work" prompt via claude --resume
+        # so the implementer keeps its working context (file reads, todos,
+        # prior reasoning). Fresh slice: send the full implementer prompt to
+        # a brand-new session as usual.
+        if is_held_resume:
+            first_prompt = prompts.resume_after_hold_prompt()
+            first_resume = True
+            first_display_name: str | None = None
+        else:
+            first_prompt = prompt_text
+            first_resume = False
+            first_display_name = f"naml-{sprint.id}-{slice_id}"
         result = run_implementer(
-            prompt=prompt_text,
+            prompt=first_prompt,
             session_id=status.session_id,
             log_path=log_path,
             cwd=worktree,
             claude_bin=cfg.claude_bin,
             claude_config_dir=cfg.claude_config_dir,
             cap_minutes=cfg.run_cap_minutes,
-            resume=False,
-            display_name=f"naml-{sprint.id}-{slice_id}",
+            resume=first_resume,
+            display_name=first_display_name,
             tokens_jsonl_path=tokens_jsonl,
             slice_id=slice_id,
             model_context_max=cfg.model_context_max,
         )
         if not _result_ok(result, status, sprint_root):
             return status.state
+        # Current turn settled — honour any HOLD requested mid-turn.
+        _await_hold_clearance(status, sprint_root)
 
         gate_result = run_gates(
             cfg.gates,
@@ -292,6 +383,8 @@ def process_slice(slice_id: str, ctx: LaneContext) -> str:
             )
             if not _result_ok(result, status, sprint_root):
                 return status.state
+            # Honour HOLD between gate-fix turns too.
+            _await_hold_clearance(status, sprint_root)
             gate_result = run_gates(
                 cfg.gates, cwd=worktree, log_path=log_path
             )
@@ -487,6 +580,7 @@ def _drive_review_loop(
         # Resume the implementer in its original session with the review text.
         _transition(status, states.WORK, sprint_root=sprint_root,
                     detail=f"applying review (attempt {attempt})")
+        _await_hold_clearance(status, sprint_root)
         fix_prompt = prompts.request_changes_prompt(
             review_text=review_result.final_text,
             pr_url=status.pr_url,
@@ -506,6 +600,7 @@ def _drive_review_loop(
         )
         if not _result_ok(impl_result, status, sprint_root):
             return status.state
+        _await_hold_clearance(status, sprint_root)
 
         # Re-run gates so we don't push known-bad code back to the PR.
         gate_result = run_gates(cfg.gates, cwd=worktree, log_path=log_path)
@@ -530,6 +625,7 @@ def _drive_review_loop(
             )
             if not _result_ok(impl_result, status, sprint_root):
                 return status.state
+            _await_hold_clearance(status, sprint_root)
             gate_result = run_gates(cfg.gates, cwd=worktree, log_path=log_path)
 
         if not gate_result.passed:

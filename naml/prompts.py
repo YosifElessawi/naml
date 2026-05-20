@@ -123,6 +123,25 @@ message). Do NOT push and do NOT open a PR. End with "DONE:" once the fix \
 is committed, or "BLOCKED:" with a question if you cannot resolve it."""
 
 
+def resume_after_hold_prompt() -> str:
+    """Resume prompt sent to the implementer when a HELD slice re-engages.
+
+    Sent with ``claude --resume <session-id>`` so the implementer keeps
+    its working context — file reads, todo list, prior reasoning. The
+    user pressed HOLD via the cockpit and has now pressed RESUME; pick
+    up where the previous turn left off without re-establishing context
+    we already paid for.
+    """
+    return (
+        "naml is resuming this slice after a user-initiated HOLD pause. "
+        "Your working directory, file edits, and todo list are preserved "
+        "from before the pause. Pick up the work where you left off. "
+        "When the slice is finished, commit your changes with a "
+        "conventional-commit message and end with \"DONE:\" — same "
+        "contract as before."
+    )
+
+
 def request_changes_prompt(*, review_text: str, pr_url: str) -> str:
     """Resume prompt sent to the implementer after the reviewer requested changes.
 

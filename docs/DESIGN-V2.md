@@ -235,9 +235,14 @@ stateDiagram-v2
     direction LR
     [*] --> setup
     setup --> work
+    setup --> held: user pressed HOLD
     work --> work: retry (cap 2)
     work --> needs_info: retries exhausted
     work --> pr
+    work --> held: user pressed HOLD (after current turn)
+    held --> work: user pressed RESUME
+    held --> failed: user pressed MARK FAILED
+    held --> abandoned: user pressed SKIP
     pr --> pr: retry (cap 3)
     pr --> failed: retries exhausted
     pr --> review
@@ -256,6 +261,23 @@ stateDiagram-v2
 - `review` spawns a **fresh** reviewer agent (A2) — never self-review.
 - Review's `request-changes` **resumes A1's session** so the implementer has its own context for the fix.
 - Retry caps are per-state, not per-slice.
+- `held` is a **user-driven safe-intervention pause**. Triggered from the
+  cockpit drawer's HOLD button (writes `state/<slice>.hold_requested`).
+  The lane finishes its in-flight Claude turn, releases its worktree
+  lock, and parks until the sentinel is removed by RESUME. While held,
+  the open-in-terminal action is unlocked so the user can `cd` into the
+  worktree without interrupting an active session. `pr` and downstream
+  states are NOT held-able — the lane is already at rest there.
+- **Cross-restart HOLD/RESUME edge case.** If the user presses RESUME via
+  the cockpit while the orchestrator process is dead (sentinel cleared
+  but no lane is running to notice), the next `naml run` will see
+  `status.state == held`, no sentinel on disk, and the scheduler's
+  `absorb_existing_statuses` defensively re-writes the sentinel — the
+  user has to press RESUME again once the orchestrator is back. This is
+  by design: naml can't honor an instruction it didn't see, and the
+  state-on-disk is the trusted record. The cockpit should surface "naml
+  is offline — interventions will queue when it restarts" so this
+  doesn't look like a bug.
 
 ### Sprint state machine
 
@@ -609,7 +631,7 @@ DIRECTORIES:
 STATE MACHINES (3 layers):
   Project  → idle | active | awaiting_human
   Sprint   → planning | executing | awaiting_signoff | merging | complete
-  Slice    → setup | work | pr | review | merged (+ failure terminals)
+  Slice    → setup | work | pr | review | merged | held (+ failure terminals)
 
 PARALLELISM:
   actual_lanes = min(configured ?? 3, dag_width, headroom)

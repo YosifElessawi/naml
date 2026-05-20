@@ -28,11 +28,12 @@ DEFAULT_PARALLEL_LANES = 3
 HARD_LANE_CAP = 8
 
 # Default repo-root entries to symlink into each lane's worktree so the agent
-# can resolve gitignored-but-needed paths (e.g. ``.venv/bin/ruff``). Override
-# via ``[worktree] symlinks`` in the project config. Empty entries are
-# silently skipped at worktree-setup time so the default list is safe on
-# projects without a ``.venv``.
-DEFAULT_WORKTREE_SYMLINKS: tuple[str, ...] = (".venv",)
+# can resolve gitignored-but-needed paths (e.g. ``.venv/bin/ruff``,
+# ``web/node_modules/.bin/biome``). Override via ``[worktree] symlinks``
+# in the project config. Empty entries are silently skipped at
+# worktree-setup time so the default list is safe on projects that lack
+# any of these paths.
+DEFAULT_WORKTREE_SYMLINKS: tuple[str, ...] = (".venv", "web/node_modules")
 
 
 class ConfigError(ValueError):

@@ -20,6 +20,12 @@ REVIEW: Final = "review"
 MERGING: Final = "merging"            # Phase 4 — slice is in the tiered merge pipeline
 MERGED: Final = "merged"
 
+# Safe-intervention pause. User-triggered via the cockpit's HOLD button;
+# the lane finishes its current Claude turn, releases its worktree lock,
+# and idles until the user presses RESUME (back to ``work``) or escalates
+# to FAILED / ABANDONED. See slice-14 in sprint 2026-05-19-cockpit-v2.
+HELD: Final = "held"
+
 # Terminals (failure / pause).
 FAILED: Final = "failed"
 NEEDS_INFO: Final = "needs_info"
@@ -36,10 +42,30 @@ REVIEW_PASSED: Final = "review_passed"
 
 SliceState = Literal[
     "pending", "setup", "work", "pr", "review", "review_passed",
-    "merging", "merged",
+    "merging", "merged", "held",
     "failed", "needs_info", "needs_human_review", "abandoned",
     "blocked_upstream", "merge_blocked",
 ]
+
+
+# States in which the slice is "safe to drop into a terminal" — naml is
+# not actively driving a Claude session. The cockpit's open-in-terminal
+# action is gated by this set. Mirrored on the browser side in
+# ``web/src/components/SliceDrawer/format.ts``.
+TERMINAL_UNLOCKED_STATES: Final[frozenset[str]] = frozenset({
+    HELD, REVIEW, REVIEW_PASSED, MERGED,
+    FAILED, NEEDS_HUMAN_REVIEW, ABANDONED, BLOCKED_UPSTREAM,
+})
+
+
+# States from which a HOLD intervention is meaningful. The lane only
+# checks the sentinel inside the work/gate-fix/review-fix loops; ``pr``
+# and downstream states never enter the spin loop, so writing a
+# sentinel there would orphan the file. Per the slice-14 spec:
+#
+#   > pr state is NOT held-able. Once the PR is open, the implementer
+#   > session is already at rest; user can open terminal directly.
+HOLDABLE_STATES: Final[frozenset[str]] = frozenset({SETUP, WORK})
 
 # States that count as "the lane is done with this slice, scheduler may
 # release dependents". A slice in needs_human_review or failed does NOT
